@@ -2,7 +2,8 @@ package cache
 
 import (
 	"context"
-	"os"
+	"erp6-be-golang/core/configs"
+	"strconv"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -18,10 +19,10 @@ func init() {
 }
 
 func NewRedisCache() (*RedisCache, error) {
-	db := configs.ConfigApps.CacheDB
+	db, _ := strconv.Atoi(configs.ConfigApps.CacheDB)
 	client := redis.NewClient(&redis.Options{
-		Addr:     configs.ConfigApps.CacheAddr
-		Password: configs.ConfigApps.CachePass
+		Addr:     configs.ConfigApps.CacheAddr,
+		Password: configs.ConfigApps.CachePass,
 		DB:       db,
 	})
 
