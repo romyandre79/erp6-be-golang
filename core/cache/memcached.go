@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"erp6-be-golang/core/configs"
 	"fmt"
 
 	"github.com/bradfitz/gomemcache/memcache"
