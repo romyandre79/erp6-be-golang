@@ -3,83 +3,104 @@ package configs
 import (
 	"erp6-be-golang/core/helpers"
 	"os"
-	"strings"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	AppEnv     string
-	AppPort    string
-	DBDriver   string
-	DBHost     string
-	DBPort     string
-	DBUser     string
-	DBPass     string
-	DBName     string
-	DBIdleConn string
-	DBMaxConn  string
-	LogMode    string
-	LogFile    string
-	LogRemote  string
-	LogDb      string
-	RedisAddr  string
-	RedisPass  string
-	RedisDB    string
-	Modules    []string
+	AppName          string
+	AppEnv           string
+	AppPort          string
+	CaseSensitive    string
+	Concurrency      string
+	BodyLimit        string
+	DisableKeepAlive string
+	DBDriver         string
+	DBHost           string
+	DBPort           string
+	DBUser           string
+	DBPass           string
+	DBName           string
+	DBIdleConn       string
+	DBMaxConn        string
+	JwtSecret        string
+	LimiterMax       string
+	LimiterExpire    string
+	LogMode          string
+	LogFile          string
+	LogRemote        string
+	LogDb            string
+	CacheType        string
+	CacheAddr        string
+	CachePass        string
+	CacheDB          string
+	SwaggerActive    string
+	Modules          []string
 }
 
-func LoadConfig() *Config {
+var ConfigApps *Config
+
+func LoadConfig() {
 	if err := godotenv.Load(); err != nil {
 		panic("No .env file found, using system env")
 	}
 
-	c := &Config{
-		AppEnv:     getEnv("APP_ENV", ""),
-		AppPort:    getEnv("APP_PORT", ""),
-		DBDriver:   getEnv("DB_DRIVER", ""),
-		DBHost:     getEnv("DB_HOST", ""),
-		DBPort:     getEnv("DB_PORT", ""),
-		DBUser:     getEnv("DB_USER", ""),
-		DBPass:     getEnv("DB_PASS", ""),
-		DBName:     getEnv("DB_NAME", ""),
-		DBIdleConn: getEnv("DB_IDLE_CONN", ""),
-		DBMaxConn:  getEnv("DB_MAX_CONN", "1"),
-		LogMode:    getEnv("LOG_MODE", ""),
-		LogFile:    getEnv("LOG_FILE", ""),
-		LogRemote:  getEnv("LOG_REMOTE", ""),
-		LogDb:      getEnv("LOG_DB", ""),
-		RedisAddr:  getEnv("REDIS_ADDR", ""),
-		RedisPass:  getEnv("REDIS_PASS", ""),
-		RedisDB:    getEnv("REDIS_DB", ""),
+	ConfigApps = &Config{
+		AppName:          getEnv("APP_NAME", ""),
+		AppEnv:           getEnv("APP_ENV", ""),
+		AppPort:          getEnv("APP_PORT", ""),
+		BodyLimit:        getEnv("BODY_LIMIT", ""),
+		CaseSensitive:    getEnv("CASE_SENSITIVE", ""),
+		Concurrency:      getEnv("CONCURRENCY", ""),
+		DBDriver:         getEnv("DB_DRIVER", ""),
+		DBHost:           getEnv("DB_HOST", ""),
+		DBPort:           getEnv("DB_PORT", ""),
+		DBUser:           getEnv("DB_USER", ""),
+		DBPass:           getEnv("DB_PASS", ""),
+		DBName:           getEnv("DB_NAME", ""),
+		DBIdleConn:       getEnv("DB_IDLE_CONN", ""),
+		DBMaxConn:        getEnv("DB_MAX_CONN", ""),
+		DisableKeepAlive: getEnv("DISABLE_KEEP_ALIVE", ""),
+		JwtSecret:        getEnv("JWT_SECRET", ""),
+		LimiterMax:       getEnv("LIMITER_MAX", ""),
+		LimiterExpire:    getEnv("LIMITER_EXPIRE", ""),
+		LogMode:          getEnv("LOG_MODE", ""),
+		LogFile:          getEnv("LOG_FILE", ""),
+		LogRemote:        getEnv("LOG_REMOTE", ""),
+		LogDb:            getEnv("LOG_DB", ""),
+		CacheType:        getEnv("CACHE_TYPE", ""),
+		CacheAddr:        getEnv("CACHE_ADDR", ""),
+		CachePass:        getEnv("CACHE_PASS", ""),
+		CacheDB:          getEnv("CACHE_DB", ""),
+		SwaggerActive:    getEnv("SWAGGER_ACTIVE", ""),
 	}
 
 	// check .env details
-	helpers.IsEmptyLog(c.AppEnv, "APP_ENV", true)
-	helpers.IsEmptyLog(c.AppPort, "APP_PORT", true)
-	helpers.IsEmptyLog(c.DBDriver, "DB_DRIVER", true)
-	helpers.IsEmptyLog(c.DBHost, "DB_HOST", true)
-	helpers.IsEmptyLog(c.DBPort, "DB_PORT", true)
-	helpers.IsEmptyLog(c.DBUser, "DB_USER", true)
-	helpers.IsEmptyLog(c.DBPass, "DB_PASS", true)
-	helpers.IsEmptyLog(c.DBName, "DB_NAME", true)
-	helpers.IsEmptyLog(c.DBIdleConn, "DB_IDLE_CONN", true)
-	helpers.IsEmptyLog(c.DBMaxConn, "DB_MAX_CONN", true)
-	helpers.IsEmptyLog(c.LogMode, "LOG_MODE", true)
-	helpers.IsEmptyLog(c.LogFile, "LOG_FILE", false)
-	helpers.IsEmptyLog(c.LogRemote, "LOG_REMOTE", false)
-	helpers.IsEmptyLog(c.LogDb, "LOG_DB", true)
-	helpers.IsEmptyLog(c.RedisAddr, "REDIS_ADDR", true)
-	helpers.IsEmptyLog(c.RedisPass, "REDIS_PASS", false)
-	helpers.IsEmptyLog(c.RedisDB, "REDIS_DB", true)
-
-	// optional MODULES env (comma separated)
-	if m := getEnv("MODULES", ""); m != "" {
-		for _, s := range strings.Split(m, ",") {
-			c.Modules = append(c.Modules, strings.TrimSpace(s))
-		}
-	}
-	return c
+	helpers.IsEmptyLog(ConfigApps.AppName, "APP_NAME", true)
+	helpers.IsEmptyLog(ConfigApps.AppEnv, "APP_ENV", true)
+	helpers.IsEmptyLog(ConfigApps.AppPort, "APP_PORT", true)
+	helpers.IsEmptyLog(ConfigApps.BodyLimit, "BODY_LIMIT", true)
+	helpers.IsEmptyLog(ConfigApps.CaseSensitive, "CASE_SENSITIVE", true)
+	helpers.IsEmptyLog(ConfigApps.Concurrency, "CONCURRENCY", true)
+	helpers.IsEmptyLog(ConfigApps.DBDriver, "DB_DRIVER", true)
+	helpers.IsEmptyLog(ConfigApps.DBHost, "DB_HOST", true)
+	helpers.IsEmptyLog(ConfigApps.DBPort, "DB_PORT", true)
+	helpers.IsEmptyLog(ConfigApps.DBUser, "DB_USER", true)
+	helpers.IsEmptyLog(ConfigApps.DBPass, "DB_PASS", true)
+	helpers.IsEmptyLog(ConfigApps.DBName, "DB_NAME", true)
+	helpers.IsEmptyLog(ConfigApps.DBIdleConn, "DB_IDLE_CONN", true)
+	helpers.IsEmptyLog(ConfigApps.DBMaxConn, "DB_MAX_CONN", true)
+	helpers.IsEmptyLog(ConfigApps.DisableKeepAlive, "DISABLE_KEEP_ALIVE", true)
+	helpers.IsEmptyLog(ConfigApps.LogMode, "LOG_MODE", true)
+	helpers.IsEmptyLog(ConfigApps.LogFile, "LOG_FILE", false)
+	helpers.IsEmptyLog(ConfigApps.LogRemote, "LOG_REMOTE", false)
+	helpers.IsEmptyLog(ConfigApps.LogDb, "LOG_DB", true)
+	helpers.IsEmptyLog(ConfigApps.CacheAddr, "REDIS_ADDR", false)
+	helpers.IsEmptyLog(ConfigApps.CachePass, "REDIS_PASS", false)
+	helpers.IsEmptyLog(ConfigApps.CacheDB, "REDIS_DB", true)
+	helpers.IsEmptyLog(ConfigApps.SwaggerActive, "SWAGGER_ACTIVE", true)
+	helpers.IsEmptyLog(ConfigApps.LimiterMax, "LIMITER_MAX", true)
+	helpers.IsEmptyLog(ConfigApps.LimiterExpire, "LIMITER_EXPIRE", true)
 }
 
 func getEnv(key, fallback string) string {

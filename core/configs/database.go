@@ -11,30 +11,30 @@ import (
 	"gorm.io/gorm"
 )
 
-func InitDatabase(cfg *Config) (*gorm.DB, error) {
+func InitDatabase() (*gorm.DB, error) {
 	var dialector gorm.Dialector
 
-	switch cfg.DBDriver {
+	switch ConfigApps.DBDriver {
 	case "postgres":
 		dsn := fmt.Sprintf(
 			"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-			cfg.DBHost, cfg.DBPort, cfg.DBUser, cfg.DBPass, cfg.DBName,
+			ConfigApps.DBHost, ConfigApps.DBPort, ConfigApps.DBUser, ConfigApps.DBPass, ConfigApps.DBName,
 		)
 		dialector = postgres.Open(dsn)
 	case "mysql", "mariadb":
 		dsn := fmt.Sprintf(
 			"%s:%s@tcp(%s:%s)/%s?parseTime=true",
-			cfg.DBUser, cfg.DBPass, cfg.DBHost, cfg.DBPort, cfg.DBName,
+			ConfigApps.DBUser, ConfigApps.DBPass, ConfigApps.DBHost, ConfigApps.DBPort, ConfigApps.DBName,
 		)
 		dialector = mysql.Open(dsn)
 	case "sqlserver":
 		dsn := fmt.Sprintf(
 			"sqlserver://%s:%s@%s:%s?database=%s",
-			cfg.DBUser, cfg.DBPass, cfg.DBHost, cfg.DBPort, cfg.DBName,
+			ConfigApps.DBUser, ConfigApps.DBPass, ConfigApps.DBHost, ConfigApps.DBPort, ConfigApps.DBName,
 		)
 		dialector = sqlserver.Open(dsn)
 	default:
-		helpers.IsEmptyLog("Unsupported DB_DRIVER: ", cfg.DBDriver, true)
+		helpers.IsEmptyLog("Unsupported DB_DRIVER: ", ConfigApps.DBDriver, true)
 	}
 
 	db, err := gorm.Open(dialector, &gorm.Config{})
@@ -43,12 +43,12 @@ func InitDatabase(cfg *Config) (*gorm.DB, error) {
 	sqlDB, err := db.DB()
 	helpers.IsError(err, "Check Open DB", true)
 
-	IdleConv, err := strconv.Atoi(cfg.DBIdleConn)
+	IdleConv, err := strconv.Atoi(ConfigApps.DBIdleConn)
 	if err == nil {
 		sqlDB.SetMaxIdleConns(IdleConv)
 	}
 
-	MaxConv, err := strconv.Atoi(cfg.DBMaxConn)
+	MaxConv, err := strconv.Atoi(ConfigApps.DBMaxConn)
 	if err == nil {
 		sqlDB.SetMaxOpenConns(MaxConv)
 	}
