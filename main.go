@@ -1,11 +1,15 @@
 package main
 
 import (
+	"erp6-be-golang/core/cache"
 	"erp6-be-golang/core/configs"
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/core/logger"
 	"erp6-be-golang/core/plugin"
 	"log"
+	"strconv"
+
+	_ "erp6-be-golang/docs"
 
 	"github.com/gofiber/contrib/swagger"
 	"github.com/gofiber/fiber/v2"
@@ -17,38 +21,51 @@ func main() {
 
 	// Load Config from .env
 	log.Print("Check Configuration ... ")
-	configApps := configs.LoadConfig()
+	configs.LoadConfig()
 
 	// Load Logger from .env
-	_, err := logger.InitLogger(configApps)
+	_, err := logger.InitLogger()
 
 	if err != nil {
 		helpers.IsError(err, "Init Logger", true)
 	}
 
 	// Load DB from .env
-	db, err := configs.InitDatabase(configApps)
+	db, err := configs.InitDatabase()
 
 	if err != nil {
 		helpers.IsError(err, "Check DB Server", true)
 	}
 
-	// Load Redis from .env
-	_, err = configs.InitRedis(configApps)
-	if err != nil {
-		helpers.IsError(err, "Redis Server", true)
-	}
+	// Load Cache from .env
+	cache.NewCache()
 
 	log.Print("End Configuration ... ")
 
 	// Init Http
-	app := fiber.New(fiber.Config{})
+	bodyLimit, _ := strconv.Atoi(configs.ConfigApps.BodyLimit)
+	caseSensitive, _ := strconv.ParseBool(configs.ConfigApps.CaseSensitive)
+	disableKeepAlive, _ := strconv.ParseBool(configs.ConfigApps.DisableKeepAlive)
+	Concurrency, _ := strconv.Atoi(configs.ConfigApps.Concurrency)
+
+	app := fiber.New(fiber.Config{
+		AppName:           configs.ConfigApps.AppName,
+		BodyLimit:         bodyLimit,
+		CaseSensitive:     caseSensitive,
+		Concurrency:       Concurrency,
+		EnablePrintRoutes: true,
+		DisableKeepalive:  disableKeepAlive,
+	})
 
 	log.Print("Load Plugin ...")
 	plugin.LoadActivePlugins(db, app)
 	log.Print("End Load Plugin ...")
 
-	app.Use(swagger.New())
+	if configs.ConfigApps.SwaggerActive == "true" {
+		app.Get("/swagger/*", swagger.New())
+	}
 
-	app.Listen(":" + configApps.AppPort)
+	app.Static("/", "./public")
+
+	app.Listen(":" + configs.ConfigApps.AppPort)
 }

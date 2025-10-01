@@ -12,9 +12,9 @@ type Logger interface {
 }
 
 // InitLogger
-func InitLogger(cfg *configs.Config) (Logger, error) {
+func InitLogger() (Logger, error) {
 	err := errors.New("unsupported, mode: file, remote, db")
-	switch cfg.LogMode {
+	switch configs.ConfigApps.LogMode {
 	case "file":
 		return NewFileLogger(), nil
 	case "remote":
