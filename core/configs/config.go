@@ -11,10 +11,10 @@ type Config struct {
 	AppName          string
 	AppEnv           string
 	AppPort          string
+	ReadBufferSize   string
 	CaseSensitive    string
 	Concurrency      string
 	BodyLimit        string
-	DisableKeepAlive string
 	DBDriver         string
 	DBHost           string
 	DBPort           string
@@ -23,6 +23,7 @@ type Config struct {
 	DBName           string
 	DBIdleConn       string
 	DBMaxConn        string
+	DisableKeepAlive string
 	JwtSecret        string
 	LimiterMax       string
 	LimiterExpire    string
@@ -35,6 +36,8 @@ type Config struct {
 	CachePass        string
 	CacheDB          string
 	SwaggerActive    string
+	StorageType      string
+	WriteBufferSize  string
 	Modules          []string
 }
 
@@ -72,7 +75,10 @@ func LoadConfig() {
 		CacheAddr:        getEnv("CACHE_ADDR", ""),
 		CachePass:        getEnv("CACHE_PASS", ""),
 		CacheDB:          getEnv("CACHE_DB", ""),
+		ReadBufferSize:   getEnv("READ_BUFFER_SIZE", ""),
 		SwaggerActive:    getEnv("SWAGGER_ACTIVE", ""),
+		StorageType:      getEnv("STORAGE_TYPE", ""),
+		WriteBufferSize:  getEnv("WRITE_BUFFER_SIZE", ""),
 	}
 
 	// check .env details
@@ -95,12 +101,16 @@ func LoadConfig() {
 	helpers.IsEmptyLog(ConfigApps.LogFile, "LOG_FILE", false)
 	helpers.IsEmptyLog(ConfigApps.LogRemote, "LOG_REMOTE", false)
 	helpers.IsEmptyLog(ConfigApps.LogDb, "LOG_DB", true)
+	helpers.IsEmptyLog(ConfigApps.CacheType, "CACHE_TYPE", false)
 	helpers.IsEmptyLog(ConfigApps.CacheAddr, "REDIS_ADDR", false)
 	helpers.IsEmptyLog(ConfigApps.CachePass, "REDIS_PASS", false)
 	helpers.IsEmptyLog(ConfigApps.CacheDB, "REDIS_DB", true)
-	helpers.IsEmptyLog(ConfigApps.SwaggerActive, "SWAGGER_ACTIVE", true)
 	helpers.IsEmptyLog(ConfigApps.LimiterMax, "LIMITER_MAX", true)
 	helpers.IsEmptyLog(ConfigApps.LimiterExpire, "LIMITER_EXPIRE", true)
+	helpers.IsEmptyLog(ConfigApps.ReadBufferSize, "READ_BUFFER_SIZE", true)
+	helpers.IsEmptyLog(ConfigApps.SwaggerActive, "SWAGGER_ACTIVE", true)
+	helpers.IsEmptyLog(ConfigApps.StorageType, "STORAGE_TYPE", false)
+	helpers.IsEmptyLog(ConfigApps.WriteBufferSize, "WRITE_BUFFER_SIZE", true)
 }
 
 func getEnv(key, fallback string) string {
