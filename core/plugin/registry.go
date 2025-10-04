@@ -31,8 +31,8 @@ func LoadActivePlugins(db *gorm.DB, app *fiber.App) {
 	for _, name := range active {
 		if p, ok := registry[name]; ok {
 			log.Printf("Load plugin: %s", name)
-			_ = p.Init()
-			p.Routes(app)
+			_ = p.Init(db)
+			p.Routes(app, db)
 		} else {
 			log.Printf("Error plugin: %s", name)
 		}

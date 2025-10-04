@@ -3,9 +3,11 @@ package main
 import (
 	"erp6-be-golang/core/cache"
 	"erp6-be-golang/core/configs"
+	"erp6-be-golang/core/email"
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/core/logger"
 	"erp6-be-golang/core/plugin"
+	"erp6-be-golang/core/storage"
 	"log"
 	"strconv"
 
@@ -17,6 +19,11 @@ import (
 
 //go:generate go run generate.go
 
+// @title ERP6 API
+// @version 1.0
+// @description API ERP6 dengan Fiber Swagger
+// @host localhost:8888
+// @BasePath /
 func main() {
 
 	// Load Config from .env
@@ -38,7 +45,21 @@ func main() {
 	}
 
 	// Load Cache from .env
-	cache.NewCache()
+	_, err = cache.NewCache()
+	if err != nil {
+		helpers.IsError(err, "Cache Server", true)
+	}
+
+	// Load Storage form .env
+	_, error := storage.Get()
+	if error {
+		helpers.IsError(err, "Storage Server", true)
+	}
+
+	_, err = email.NewEmailSender()
+	if err != nil {
+		helpers.IsError(err, "Email Server", true)
+	}
 
 	log.Print("End Configuration ... ")
 
@@ -47,6 +68,8 @@ func main() {
 	caseSensitive, _ := strconv.ParseBool(configs.ConfigApps.CaseSensitive)
 	disableKeepAlive, _ := strconv.ParseBool(configs.ConfigApps.DisableKeepAlive)
 	Concurrency, _ := strconv.Atoi(configs.ConfigApps.Concurrency)
+	ReadBufferSize, _ := strconv.Atoi(configs.ConfigApps.ReadBufferSize)
+	WriteBufferSize, _ := strconv.Atoi(configs.ConfigApps.WriteBufferSize)
 
 	app := fiber.New(fiber.Config{
 		AppName:           configs.ConfigApps.AppName,
@@ -55,15 +78,17 @@ func main() {
 		Concurrency:       Concurrency,
 		EnablePrintRoutes: true,
 		DisableKeepalive:  disableKeepAlive,
+		ReadBufferSize:    ReadBufferSize,
+		WriteBufferSize:   WriteBufferSize,
 	})
 
 	log.Print("Load Plugin ...")
 	plugin.LoadActivePlugins(db, app)
 	log.Print("End Load Plugin ...")
 
-	if configs.ConfigApps.SwaggerActive == "true" {
-		app.Get("/swagger/*", swagger.New())
-	}
+	app.Get("/swagger/*", swagger.New(swagger.Config{
+		BasePath: "/", // default
+	}))
 
 	app.Static("/", "./public")
 
