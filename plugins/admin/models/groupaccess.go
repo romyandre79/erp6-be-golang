@@ -12,7 +12,10 @@ type GroupAccess struct {
 	UpdateDate    time.Time `gorm:"column:updatedate;autoUpdateTime"`
 
 	// Relasi ke UserGroup (many-to-many ke UserAccess)
-	UserGroups []UserGroup `gorm:"foreignKey:GroupAccessID"`
+	UserGroups []UserGroup `gorm:"foreignKey:GroupAccessID;references:GroupAccessID" json:"usergroups"`
+
+	// Relasi ke GroupMenu (many-to-many ke GroupMenu)
+	GroupMenus []GroupMenu `gorm:"foreignKey:GroupAccessID;references:GroupAccessID" json:"groupmenus"`
 }
 
 // Nama tabel custom

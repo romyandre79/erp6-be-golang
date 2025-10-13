@@ -13,7 +13,6 @@ import (
 
 	_ "erp6-be-golang/docs"
 
-	"github.com/gofiber/contrib/swagger"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -85,10 +84,6 @@ func main() {
 	log.Print("Load Plugin ...")
 	plugin.LoadActivePlugins(db, app)
 	log.Print("End Load Plugin ...")
-
-	app.Get("/swagger/*", swagger.New(swagger.Config{
-		BasePath: "/", // default
-	}))
 
 	app.Static("/", "./public")
 

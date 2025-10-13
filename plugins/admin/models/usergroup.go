@@ -5,14 +5,14 @@ import (
 )
 
 type UserGroup struct {
-	UserGroupID   int       `gorm:"column:usergroupid;primaryKey;autoIncrement"`
-	UserAccessID  int       `gorm:"column:useraccessid;not null"`
-	GroupAccessID int       `gorm:"column:groupaccessid;not null"`
-	UpdateDate    time.Time `gorm:"column:updatedate;autoUpdateTime"`
+	UserGroupID   uint      `gorm:"primaryKey;column:usergroupid"`
+	UserAccessID  uint      `gorm:"column:useraccessid"`
+	GroupAccessID uint      `gorm:"column:groupaccessid"`
+	UpdateDate    time.Time `gorm:"column:updatedate"`
 
-	// Relasi
-	GroupAccess GroupAccess `gorm:"foreignKey:GroupAccessID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	UserAccess  UserAccess  `gorm:"foreignKey:UserAccessID;constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
+	// Relasi eksplisit, biar GORM tahu arah referensinya
+	GroupAccess GroupAccess `gorm:"foreignKey:GroupAccessID;references:GroupAccessID"`
+	UserAccess  UserAccess  `gorm:"foreignKey:UserAccessID;references:UserAccessID"`
 }
 
 // Nama tabel custom

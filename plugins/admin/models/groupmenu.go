@@ -10,13 +10,13 @@ type GroupMenu struct {
 	GroupAccessID int `gorm:"column:groupaccessid;not null" json:"groupaccessid"`
 	MenuAccessID  int `gorm:"column:menuaccessid;not null" json:"menuaccessid"`
 
-	IsRead     bool `gorm:"column:isread;default:1" json:"isread"`
-	IsWrite    bool `gorm:"column:iswrite;default:1" json:"iswrite"`
-	IsPost     bool `gorm:"column:ispost;default:1" json:"ispost"`
-	IsReject   bool `gorm:"column:isreject;default:1" json:"isreject"`
-	IsUpload   bool `gorm:"column:isupload;default:1" json:"isupload"`
-	IsDownload bool `gorm:"column:isdownload;default:1" json:"isdownload"`
-	IsPurge    bool `gorm:"column:ispurge;default:1" json:"ispurge"`
+	IsRead     int `gorm:"column:isread;default:1" json:"isread"`
+	IsWrite    int `gorm:"column:iswrite;default:1" json:"iswrite"`
+	IsPost     int `gorm:"column:ispost;default:1" json:"ispost"`
+	IsReject   int `gorm:"column:isreject;default:1" json:"isreject"`
+	IsUpload   int `gorm:"column:isupload;default:1" json:"isupload"`
+	IsDownload int `gorm:"column:isdownload;default:1" json:"isdownload"`
+	IsPurge    int `gorm:"column:ispurge;default:1" json:"ispurge"`
 
 	UpdatedAt time.Time `gorm:"column:updatedate;autoUpdateTime" json:"updatedate"`
 

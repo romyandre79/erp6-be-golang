@@ -3,6 +3,7 @@ package admin
 
 import (
 	"erp6-be-golang/core/configs"
+	"erp6-be-golang/core/helpers"
 	adminModels "erp6-be-golang/plugins/admin/models"
 	"time"
 
@@ -22,9 +23,9 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 
 	// passing db via closure
 	r.Post("/login", func(c *fiber.Ctx) error { return loginHandler(c, db) })
-	r.Post("/logout", logoutHandler)
+	r.Post("/logout", func(c *fiber.Ctx) error { return logoutHandler(c, db) })
 
-	protected := r.Group("/api")
+	protected := r.Group("/admin")
 	protected.Use(AuthMiddleware)
 	protected.Get("/me", func(c *fiber.Ctx) error { return meHandler(c, db) })
 }
@@ -43,38 +44,53 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 func loginHandler(c *fiber.Ctx, db *gorm.DB) error {
 	var body loginRequest
 	if err := c.BodyParser(&body); err != nil {
-		return c.Status(400).JSON(fiber.Map{"error": "invalid payload"})
+		return helpers.FailResponse(c, fiber.StatusBadRequest, "invalid payload", err.Error())
 	}
 
 	var user adminModels.UserAccess
-	if err := db.Where("username = ? AND recordstatus = 1", body.Username).First(&user).Error; err != nil {
-		return c.Status(401).JSON(fiber.Map{"error": "user not found or inactive"})
+	if err := db.Where("username = ? AND recordstatus = 1", body.Username).
+		First(&user).Error; err != nil {
+		return helpers.FailResponse(c, fiber.StatusUnauthorized, "user not found or inactive", err.Error())
 	}
 
 	// cek password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(body.Password)); err != nil {
-		return c.Status(401).JSON(fiber.Map{"error": "invalid credentials"})
+		return helpers.FailResponse(c, fiber.StatusUnauthorized, "invalid credentials", "password mismatch")
 	}
 
 	// update last login
 	user.LastLogin = time.Now()
-	db.Save(&user)
+	user.IsOnline = true
+	_ = db.Save(&user)
 
 	// generate JWT
 	claims := jwt.MapClaims{
 		"userid":   user.UserAccessID,
 		"username": user.Username,
-		"role":     "admin", // nanti bisa buat role table
 		"exp":      time.Now().Add(time.Hour * 1).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	t, err := token.SignedString([]byte(configs.ConfigApps.JwtSecret))
 	if err != nil {
-		return c.SendStatus(500)
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "failed to generate token", err.Error())
 	}
 
-	return c.JSON(fiber.Map{"token": t})
+	if err := db.Preload("Groups.GroupAccess.GroupMenus.MenuAccess").
+		First(&user, claims["userid"]).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "user not found"})
+	}
+
+	return helpers.SuccessResponse(c, "login success", fiber.Map{
+		"token": t,
+		"user": fiber.Map{
+			"userid":   user.UserAccessID,
+			"username": user.Username,
+			"realname": user.RealName,
+			"email":    user.Email,
+			"groups":   user.Groups,
+		},
+	})
 }
 
 // logoutHandler godoc
@@ -84,8 +100,26 @@ func loginHandler(c *fiber.Ctx, db *gorm.DB) error {
 // @Produce json
 // @Success 200 {object} map[string]string
 // @Router /auth/logout [post]
-func logoutHandler(c *fiber.Ctx) error {
-	return c.JSON(fiber.Map{"message": "logged out"})
+func logoutHandler(c *fiber.Ctx, db *gorm.DB) error {
+	claims, err := GetUserFromContext(c)
+	if err != nil {
+		return helpers.FailResponse(c, fiber.StatusUnauthorized, "unauthorized", err.Error())
+	}
+
+	var user adminModels.UserAccess
+	if err := db.First(&user, claims["userid"]).Error; err != nil {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "user not found", err.Error())
+	}
+
+	user.LastLogin = time.Now()
+	if err := db.Save(&user).Error; err != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "failed to update logout time", err.Error())
+	}
+
+	// opsional: tambahkan ke blacklist (redis / db)
+	// blacklistToken(claims["jti"].(string))
+
+	return helpers.SuccessResponse(c, "logout success", nil)
 }
 
 // meHandler godoc
@@ -95,7 +129,7 @@ func logoutHandler(c *fiber.Ctx) error {
 // @Produce json
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} map[string]string
-// @Router /auth/api/me [get]
+// @Router /auth/me [get]
 func meHandler(c *fiber.Ctx, db *gorm.DB) error {
 	claims, err := GetUserFromContext(c)
 	if err != nil {
@@ -103,7 +137,8 @@ func meHandler(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	var user adminModels.UserAccess
-	if err := db.First(&user, claims["userid"]).Error; err != nil {
+	if err := db.Preload("Groups.GroupAccess.GroupMenus.MenuAccess").
+		First(&user, claims["userid"]).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "user not found"})
 	}
 
@@ -112,6 +147,6 @@ func meHandler(c *fiber.Ctx, db *gorm.DB) error {
 		"username": user.Username,
 		"realname": user.RealName,
 		"email":    user.Email,
-		"role":     claims["role"],
+		"groups":   user.Groups,
 	})
 }
