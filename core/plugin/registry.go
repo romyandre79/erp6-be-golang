@@ -1,7 +1,7 @@
 package plugin
 
 import (
-	"erp6-be-golang/core/models"
+	"erp6-be-golang/models"
 	"log"
 
 	"github.com/gofiber/fiber/v2"
@@ -21,11 +21,11 @@ func Register(p Plugin) {
 func LoadActivePlugins(db *gorm.DB, app *fiber.App) {
 
 	active := []string{}
-	var modules []models.Module
+	var modules []models.Modules
 	db.Where("recordstatus = ?", 1).Find(&modules)
 
 	for _, m := range modules {
-		active = append(active, m.ModuleName)
+		active = append(active, m.Modulename)
 	}
 
 	for _, name := range active {

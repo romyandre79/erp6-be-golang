@@ -1,9 +1,11 @@
 package admin
 
 import (
-	admin "erp6-be-golang/plugins/admin/models"
+	"erp6-be-golang/core/helpers"
+	"erp6-be-golang/models"
 	"errors"
 
+	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
 
@@ -19,32 +21,38 @@ const (
 	PermPurge    PermissionAction = "purge"
 )
 
-// Can check apakah user punya izin terhadap menu dengan kode tertentu
-func GetGroupRole(db *gorm.DB, userID int, menuCode string, action PermissionAction) (bool, error) {
-	var user admin.UserAccess
-	if err := db.Preload("Groups.GroupAccess.GroupMenus.MenuAccess").
+// check User Permission based on menu name and action
+func CheckUserPermission(c *fiber.Ctx, db *gorm.DB, menuName string, action PermissionAction) (bool, error) {
+	userID := c.Locals("userid")
+
+	if userID == nil {
+		return false, helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_USER", "")
+	}
+
+	var user models.Useraccess
+	if err := db.Preload("Usergroups.Groupaccess.Groupmenus.Menuaccess").
 		First(&user, userID).Error; err != nil {
 		return false, err
 	}
 
-	for _, ug := range user.Groups {
-		for _, gm := range ug.GroupAccess.GroupMenus {
-			if gm.MenuAccess.MenuCode == menuCode {
+	for _, ug := range user.Usergroups {
+		for _, gm := range ug.Groupaccess.Groupmenus {
+			if gm.Menuaccess.Menuname == menuName {
 				switch action {
 				case PermRead:
-					return gm.IsRead == 1, nil
+					return gm.Isread == 1, nil
 				case PermWrite:
-					return gm.IsWrite == 1, nil
+					return gm.Iswrite == 1, nil
 				case PermPost:
-					return gm.IsPost == 1, nil
+					return gm.Ispost == 1, nil
 				case PermReject:
-					return gm.IsReject == 1, nil
+					return gm.Isreject == 1, nil
 				case PermUpload:
-					return gm.IsUpload == 1, nil
+					return gm.Isupload == 1, nil
 				case PermDownload:
-					return gm.IsDownload == 1, nil
+					return gm.Isdownload == 1, nil
 				case PermPurge:
-					return gm.IsPurge == 1, nil
+					return gm.Ispurge == 1, nil
 				default:
 					return false, errors.New("invalid action")
 				}
@@ -52,16 +60,4 @@ func GetGroupRole(db *gorm.DB, userID int, menuCode string, action PermissionAct
 		}
 	}
 	return false, nil
-}
-
-func LoadUserWithPermissions(db *gorm.DB, userID int) (*admin.UserAccess, error) {
-	var user admin.UserAccess
-
-	err := db.Preload("Groups.GroupAccess.GroupMenus.MenuAccess").
-		First(&user, userID).Error
-	if err != nil {
-		return nil, err
-	}
-
-	return &user, nil
 }
