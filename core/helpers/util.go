@@ -3,6 +3,8 @@ package helpers
 import (
 	"log"
 	"slices"
+	"strings"
+	"unicode"
 )
 
 func IsEmpty(v string) bool {
@@ -48,4 +50,23 @@ func IsError(err error, varText string, isRequired bool) {
 	} else {
 		log.Printf(varText+" %s", ICON_OK)
 	}
+}
+
+func ToCamelCase(s string) string {
+	parts := strings.Split(s, "_")
+	for i := range parts {
+		parts[i] = strings.Title(parts[i])
+	}
+	return strings.Join(parts, "")
+}
+
+func ToSnakeCase(s string) string {
+	var result []rune
+	for i, r := range s {
+		if unicode.IsUpper(r) && i > 0 {
+			result = append(result, '_')
+		}
+		result = append(result, unicode.ToLower(r))
+	}
+	return string(result)
 }

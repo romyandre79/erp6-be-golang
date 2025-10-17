@@ -11,8 +11,6 @@ import (
 	"log"
 	"strconv"
 
-	_ "erp6-be-golang/docs"
-
 	"github.com/gofiber/fiber/v2"
 )
 

@@ -25,6 +25,7 @@ type Config struct {
 	DBMaxConn        string
 	DisableKeepAlive string
 	JwtSecret        string
+	JwtTtlHour       string
 	LimiterMax       string
 	LimiterExpire    string
 	LogMode          string
@@ -65,6 +66,7 @@ func LoadConfig() {
 		DBMaxConn:        getEnv("DB_MAX_CONN", ""),
 		DisableKeepAlive: getEnv("DISABLE_KEEP_ALIVE", ""),
 		JwtSecret:        getEnv("JWT_SECRET", ""),
+		JwtTtlHour:       getEnv("JWT_TTL_HOUR", ""),
 		LimiterMax:       getEnv("LIMITER_MAX", ""),
 		LimiterExpire:    getEnv("LIMITER_EXPIRE", ""),
 		LogMode:          getEnv("LOG_MODE", ""),
@@ -97,6 +99,8 @@ func LoadConfig() {
 	helpers.IsEmptyLog(ConfigApps.DBIdleConn, "DB_IDLE_CONN", true)
 	helpers.IsEmptyLog(ConfigApps.DBMaxConn, "DB_MAX_CONN", true)
 	helpers.IsEmptyLog(ConfigApps.DisableKeepAlive, "DISABLE_KEEP_ALIVE", true)
+	helpers.IsEmptyLog(ConfigApps.JwtTtlHour, "JWT_TTL_HOUR", true)
+	helpers.IsEmptyLog(ConfigApps.JwtSecret, "JWT_SECRET", true)
 	helpers.IsEmptyLog(ConfigApps.LogMode, "LOG_MODE", true)
 	helpers.IsEmptyLog(ConfigApps.LogFile, "LOG_FILE", false)
 	helpers.IsEmptyLog(ConfigApps.LogRemote, "LOG_REMOTE", false)
