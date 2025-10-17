@@ -249,7 +249,9 @@ func ({{.StructName}}) TableName() string {
 		})
 		switch c.DataType {
 		case "timestamp", "time", "date":
-			importStatement += `  "time"`
+			if !strings.Contains(importStatement, "time") {
+				importStatement += `  "time"`
+			}
 			continue
 		}
 	}

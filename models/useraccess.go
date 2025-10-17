@@ -23,8 +23,8 @@ type Useraccess struct {
 	Recordstatus int       `gorm:"column:recordstatus" json:"recordstatus"`
 	Lastlogin    time.Time `gorm:"column:lastlogin" json:"lastlogin"`
 	Updatedate   time.Time `gorm:"column:updatedate" json:"updatedate"`
-	Language     *Language `gorm:"foreignKey:languageid;references:languageid"`
-	Theme        *Theme    `gorm:"foreignKey:themeid;references:themeid"`
+	Language     Language  `gorm:"foreignKey:languageid;references:languageid" json:"language"`
+	Theme        Theme     `gorm:"foreignKey:themeid;references:themeid" json:"theme"`
 
 	Usergroups []Usergroup `gorm:"foreignKey:Useraccessid;references:Useraccessid" json:"groups"`
 }
