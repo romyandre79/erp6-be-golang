@@ -2,6 +2,8 @@ package admin
 
 import (
 	"erp6-be-golang/core/configs"
+	gendb "erp6-be-golang/core/generator/db"
+	genfile "erp6-be-golang/core/generator/file"
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/models"
 	"erp6-be-golang/response"
@@ -32,7 +34,7 @@ type CustomClaims struct {
 // @Failure 400 {object} map[string]string
 // @Failure 401 {object} map[string]string
 // @Router /auth/login [post]
-func loginHandler(c *fiber.Ctx, db *gorm.DB) error {
+func LoginHandler(c *fiber.Ctx, db *gorm.DB) error {
 	var body loginRequest
 	if err := c.BodyParser(&body); err != nil {
 		return helpers.FailResponse(c, fiber.StatusBadRequest, "invalid payload", err.Error())
@@ -95,7 +97,7 @@ func loginHandler(c *fiber.Ctx, db *gorm.DB) error {
 // @Produce json
 // @Success 200 {object} map[string]string
 // @Router /auth/logout [post]
-func logoutHandler(c *fiber.Ctx, db *gorm.DB) error {
+func LogoutHandler(c *fiber.Ctx, db *gorm.DB) error {
 	userID := c.Locals("userid")
 
 	if userID == nil {
@@ -128,7 +130,7 @@ func logoutHandler(c *fiber.Ctx, db *gorm.DB) error {
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} map[string]string
 // @Router /auth/me [get]
-func meHandler(c *fiber.Ctx, db *gorm.DB) error {
+func MeHandler(c *fiber.Ctx, db *gorm.DB) error {
 	userID := c.Locals("userid")
 
 	if userID == nil {
@@ -177,4 +179,39 @@ func meHandler(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	return helpers.SuccessResponse(c, "DATA_RETRIEVE", resp)
+}
+
+func CreateModulesHandler(c *fiber.Ctx, db *gorm.DB) error {
+	menuName := c.FormValue("menu")
+	pluginName := c.FormValue("plugin")
+	IsPermission, err := CheckUserPermission(c, db, menuName, PermWrite)
+	if err != nil || !IsPermission {
+		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+	}
+
+	err = genfile.GeneratePlugin(pluginName)
+	if err != nil || !IsPermission {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_PLUGIN_GENERATE", err.Error())
+	}
+	return helpers.SuccessResponse(c, "DATA_SAVED", nil)
+}
+
+func GenerateTableHandler(c *fiber.Ctx, db *gorm.DB) error {
+	menuName := c.FormValue("menu")
+	tableName := c.FormValue("table")
+	IsPermission, err := CheckUserPermission(c, db, menuName, PermWrite)
+	if err != nil || !IsPermission {
+		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+	}
+
+	if tableName == "" {
+		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_TABLE", "")
+	}
+
+	err = gendb.GenerateStructWithMeta(db, tableName)
+	if err != nil {
+		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_GENERAL_TABLE", err.Error())
+	}
+
+	return helpers.SuccessResponse(c, "DATA_SAVED", nil)
 }

@@ -2,6 +2,9 @@
 package admin
 
 import (
+	"erp6-be-golang/core/plugin"
+	"erp6-be-golang/models"
+
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
@@ -15,20 +18,21 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	auth := app.Group("/auth")
 
 	// Public routes
-	auth.Post("/login", func(c *fiber.Ctx) error { return loginHandler(c, db) })
+	auth.Post("/login", func(c *fiber.Ctx) error { return LoginHandler(c, db) })
 
 	// Protected routes
 	auth.Use(AuthMiddleware)
 	{
 		//auth
-		auth.Post("/logout", func(c *fiber.Ctx) error { return logoutHandler(c, db) })
-		auth.Get("/me", func(c *fiber.Ctx) error { return meHandler(c, db) })
+		auth.Post("/logout", func(c *fiber.Ctx) error { return LogoutHandler(c, db) })
+		auth.Get("/me", func(c *fiber.Ctx) error { return MeHandler(c, db) })
 	}
 
 	admin := app.Group("/admin")
 	admin.Use(AuthMiddleware)
 	{
-		admin.Post("/generate-table", func(c *fiber.Ctx) error { return generateTableHandler(c, db) })
-		admin.Post("/generate-module", func(c *fiber.Ctx) error { return createModulesHandler(c, db) })
+		admin.Post("/generate-table", func(c *fiber.Ctx) error { return GenerateTableHandler(c, db) })
+		admin.Post("/generate-module", func(c *fiber.Ctx) error { return CreateModulesHandler(c, db) })
+		plugin.RegisterModelRoutes(admin, db, models.Useraccess{}, "useraccess")
 	}
 }
