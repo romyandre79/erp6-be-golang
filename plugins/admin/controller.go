@@ -188,7 +188,7 @@ func CreateModulesHandler(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	modelList := strings.Split(modelName, ",")
-	err = genfile.GeneratePlugin(pluginName, modelList)
+	err = genfile.GeneratePlugin(db, pluginName, modelList)
 	if err != nil || !IsPermission {
 		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_PLUGIN_GENERATE", err.Error())
 	}

@@ -56,5 +56,8 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		plugin.RegisterModelRoutes(admin, db, models.Wfstatus{}, "wfstatus")
 		plugin.RegisterModelRoutes(admin, db, models.Wfgroup{}, "wfgroup")
 		plugin.RegisterModelRoutes(admin, db, models.Translog{}, "translog")
+		plugin.RegisterModelRoutes(admin, db, models.Apps{}, "apps")
+		plugin.RegisterModelRoutes(admin, db, models.Appscompany{}, "appscompany")
+		plugin.RegisterModelRoutes(admin, db, models.Appsmenu{}, "appsmenu")
 	}
 }

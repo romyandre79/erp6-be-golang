@@ -5,5 +5,7 @@
     "INVALID_DATA_EXISTS": "Data {{.field}} has exists",
     "INVALID_DATA_DUPLICATE": "Data cannot be duplicate",
     "INVALID_PLUGIN_GENERATE": "Plugin already exists",
+    "INVALID_TOKEN": "Token tidak valid",
+    "token has invalid claims: token is expired": "token has invalid claims: token is expired",
     "DATA_SAVED": "Data Saved"
 }

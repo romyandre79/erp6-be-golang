@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+	"gorm.io/gorm"
 )
 
 var initTemplate = `package {{name}}
@@ -105,15 +106,17 @@ func createFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
-func GeneratePlugin(pluginName string, modelList []string) error {
+func GeneratePlugin(db *gorm.DB, pluginName string, modelList []string) error {
 	caser := cases.Title(language.English)
 	structName := caser.String(pluginName)
 	basePath := filepath.Join("plugins", pluginName)
-	// Buat folder plugin
+
 	if err := os.MkdirAll(basePath, os.ModePerm); os.IsExist(err) {
 		fmt.Printf("❌ Failed to create folder: %v\n", err)
 		return err
 	}
+
+	// TODO check modules, kalau tidak ada simpan di db
 
 	initModels := ""
 	initRoutes := pluginName + ` := app.Group("/` + pluginName + `")`
