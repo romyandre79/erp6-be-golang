@@ -31,6 +31,8 @@ func (h {{structName}}Plugin) Routes(app *fiber.App, db *gorm.DB) {
 
 func init() {
 	plugin.Register({{structName}}Plugin{})
+
+	{{initModels}}
 }
 `
 
@@ -38,6 +40,10 @@ func init() {
 var routesTemplate = `package {{name}}
 
 import (
+	"erp6-be-golang/core/plugin"
+	"erp6-be-golang/models"
+	"erp6-be-golang/plugins/admin"
+
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
@@ -46,6 +52,47 @@ import (
 // Isi sesuai kebutuhan modul.
 func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	// TODO: implement routes
+	{{initroutes}}
+}
+`
+
+var modelControllerTemplate = `package {{name}}
+
+import "erp6-be-golang/core/events"
+
+func Init{{model}} () {
+	events.Register("BeforeGet:{{model}}", func(data interface{}) error {
+	    // TODO: implement before get
+		return nil
+	})
+	events.Register("AfterGet:{{model}}", func(data interface{}) error {
+	    // TODO: implement after get
+		return nil
+	})
+	events.Register("BeforeSave:{{model}}", func(data interface{}) error {
+	    // TODO: implement before save
+		return nil
+	})
+	events.Register("AfterSave:{{model}}", func(data interface{}) error {
+	    // TODO: implement after save
+		return nil
+	})
+	events.Register("BeforeUpdate:{{model}}", func(data interface{}) error {
+	    // TODO: implement before update
+		return nil
+	})
+	events.Register("AfterUpdate:{{model}}", func(data interface{}) error {
+	    // TODO: implement after update
+		return nil
+	})
+	events.Register("BeforeDelete:{{model}}", func(data interface{}) error {
+	    // TODO: implement before delete
+		return nil
+	})
+	events.Register("AfterDelete:{{model}}", func(data interface{}) error {
+	    // TODO: implement after delete
+		return nil
+	})
 }
 `
 
@@ -53,28 +100,32 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 func createFile(path, content string) error {
 	if _, err := os.Stat(path); err == nil {
 		fmt.Printf("⚠️  File already exists: %s\n", path)
-		return nil
+		return err
 	}
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
-func GeneratePlugin(pluginName string) error {
+func GeneratePlugin(pluginName string, modelList []string) error {
 	caser := cases.Title(language.English)
 	structName := caser.String(pluginName)
 	basePath := filepath.Join("plugins", pluginName)
-	if _, err := os.Stat(basePath); err == nil {
-		fmt.Printf("⚠️  Plugin '%s' already exists.\n", pluginName)
-		return err
-	}
-
 	// Buat folder plugin
-	if err := os.MkdirAll(basePath, os.ModePerm); err != nil {
+	if err := os.MkdirAll(basePath, os.ModePerm); os.IsExist(err) {
 		fmt.Printf("❌ Failed to create folder: %v\n", err)
 		return err
 	}
 
-	initContent := strings.ReplaceAll(strings.ReplaceAll(initTemplate, "{{name}}", pluginName), "{{structName}}", structName)
-	routesContent := strings.ReplaceAll(routesTemplate, "{{name}}", pluginName)
+	initModels := ""
+	initRoutes := pluginName + ` := app.Group("/` + pluginName + `")`
+	initRoutes += "\n" + pluginName + ".Use(admin.AuthMiddleware)\n{\n"
+	for _, val := range modelList {
+		initModels += "Init" + val + "()\n"
+		initRoutes += `plugin.RegisterModelRoutes(` + pluginName + `, db, models.` + strings.Title(strings.ToLower(val)) + `{}, "` + val + `")`
+		initRoutes += "\n"
+	}
+	initRoutes += "\n}\n"
+	initContent := strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(initTemplate, "{{name}}", pluginName), "{{structName}}", structName), "{{initModels}}", initModels)
+	routesContent := strings.ReplaceAll(strings.ReplaceAll(routesTemplate, "{{name}}", pluginName), "{{initroutes}}", initRoutes)
 
 	files := map[string]string{
 		"init.go":       initContent,
@@ -88,6 +139,17 @@ func GeneratePlugin(pluginName string) error {
 		path := filepath.Join(basePath, name)
 		if err := createFile(path, content); err != nil {
 			fmt.Printf("❌ Failed to create file %s: %v\n", name, err)
+			return err
+		} else {
+			fmt.Printf("✅ Created %s\n", path)
+		}
+	}
+
+	for _, val := range modelList {
+		modelControllerContent := strings.ReplaceAll(strings.ReplaceAll(modelControllerTemplate, "{{model}}", val), "{{name}}", pluginName)
+		path := filepath.Join(basePath, val+"controller.go")
+		if err := createFile(path, modelControllerContent); err != nil {
+			fmt.Printf("❌ Failed to create file %s: %v\n", val, err)
 			return err
 		} else {
 			fmt.Printf("✅ Created %s\n", path)

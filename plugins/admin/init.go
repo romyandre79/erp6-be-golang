@@ -1,9 +1,7 @@
 package admin
 
 import (
-	"erp6-be-golang/core/events"
 	"erp6-be-golang/core/plugin"
-	"fmt"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -21,13 +19,8 @@ func (h AdminPlugin) Routes(app *fiber.App, db *gorm.DB) {
 
 func init() {
 	plugin.Register(AdminPlugin{})
-	events.Register("BeforeGet:useraccess", func(data interface{}) error {
-		fmt.Println("👋 User baru dibuat:", data)
-		return nil
-	})
 
-	events.Register("AfterGet:useraccess", func(data interface{}) error {
-		fmt.Println("⚠️ Akan dihapus:", data)
-		return nil
-	})
+	InitLanguage()
+	InitUseraccess()
+
 }

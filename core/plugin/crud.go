@@ -3,12 +3,16 @@ package plugin
 import (
 	"erp6-be-golang/core/events"
 	"erp6-be-golang/core/helpers"
+	"erp6-be-golang/core/i18n"
+	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
+	"gorm.io/gorm/utils"
 )
 
 // RegisterModelRoutes membuat endpoint CRUD otomatis berdasarkan model GORM.
@@ -31,6 +35,10 @@ func RegisterModelRoutes(router fiber.Router, db *gorm.DB, model interface{}, na
 
 func listHandler(db *gorm.DB, model interface{}) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		lang := c.FormValue("lang")
+		if lang == "" {
+			lang = "id"
+		}
 		modelType := reflect.TypeOf(model)
 		sliceType := reflect.SliceOf(reflect.TypeOf(model))
 		slicePtr := reflect.New(sliceType).Interface()
@@ -38,7 +46,7 @@ func listHandler(db *gorm.DB, model interface{}) fiber.Handler {
 		dbWithPreload := autoPreload(db, modelType)
 
 		if err := dbWithPreload.Find(slicePtr).Error; err != nil {
-			return helpers.FailResponse(c, 500, "INVALID_ERROR", err.Error())
+			return helpers.FailResponse(c, 400, "INVALID_ERROR", err.Error())
 		}
 		return helpers.SuccessResponse(c, "DATA_RETRIEVED", slicePtr)
 	}
@@ -46,24 +54,28 @@ func listHandler(db *gorm.DB, model interface{}) fiber.Handler {
 
 func getHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		lang := c.FormValue("lang")
+		if lang == "" {
+			lang = "id"
+		}
 		id := c.Params("id")
 		obj := reflect.New(reflect.TypeOf(model)).Interface()
 
 		if err := events.Trigger("BeforeGet:"+name, obj); err != nil {
-			return helpers.FailResponse(c, 500, "INVALID_RETRIEVE", err.Error())
+			return helpers.FailResponse(c, 400, "INVALID_RETRIEVE", err.Error())
 		}
 
 		dbWithPreload := autoPreload(db, reflect.TypeOf(model))
 
 		if err := dbWithPreload.First(obj, id).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
-				return helpers.FailResponse(c, 404, "INVALID_DATA", "Record not found")
+				return helpers.FailResponse(c, 400, "INVALID_DATA", "DATA_NOT_FOUND")
 			}
-			return helpers.FailResponse(c, 500, "INVALID_DATA", err.Error())
+			return helpers.FailResponse(c, 400, "INVALID_DATA", err.Error())
 		}
 
 		if err := events.Trigger("AfterGet:"+name, obj); err != nil {
-			return helpers.FailResponse(c, 500, "INVALID_RETRIEVE", err.Error())
+			return helpers.FailResponse(c, 400, "INVALID_RETRIEVE", err.Error())
 		}
 
 		return helpers.SuccessResponse(c, "DATA_RETRIEVED", obj)
@@ -72,6 +84,10 @@ func getHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 
 func createHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		lang := c.FormValue("lang")
+		if lang == "" {
+			lang = "id"
+		}
 		obj := reflect.New(reflect.TypeOf(model)).Interface()
 
 		if err := events.Trigger("BeforeCreate:"+name, obj); err != nil {
@@ -79,11 +95,11 @@ func createHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 		}
 
 		if err := c.BodyParser(obj); err != nil {
-			return helpers.FailResponse(c, 500, "INVALID_CREATE", err.Error())
+			return helpers.FailResponse(c, 400, "INVALID_CREATE", err.Error())
 		}
 
 		if err := db.Create(obj).Error; err != nil {
-			return helpers.FailResponse(c, 500, "INVALID_CREATE", err.Error())
+			return helpers.FailResponse(c, 400, "INVALID_CREATE", friendlySQLError(err, lang))
 		}
 
 		if err := events.Trigger("AfterCreate:"+name, obj); err != nil {
@@ -95,6 +111,10 @@ func createHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 
 func updateHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		lang := c.FormValue("lang")
+		if lang == "" {
+			lang = "id"
+		}
 		id := c.Params("id")
 		obj := reflect.New(reflect.TypeOf(model)).Interface()
 
@@ -104,17 +124,17 @@ func updateHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 
 		if err := db.First(obj, id).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
-				return c.Status(404).JSON(fiber.Map{"error": "Record not found"})
+				return helpers.FailResponse(c, 400, "INVALID_UPDATE", "Record Not Found")
 			}
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			return helpers.FailResponse(c, 400, "INVALID_UPDATE", err.Error())
 		}
 
 		if err := c.BodyParser(obj); err != nil {
-			return c.Status(400).JSON(fiber.Map{"error": "Invalid JSON payload", "detail": err.Error()})
+			return helpers.FailResponse(c, 400, "INVALID_UPDATE", err.Error())
 		}
 
 		if err := db.Save(obj).Error; err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		if err := events.Trigger("AfterUpdate:"+name, obj); err != nil {
@@ -127,6 +147,10 @@ func updateHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 
 func deleteHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		lang := c.FormValue("lang")
+		if lang == "" {
+			lang = "id"
+		}
 		id := c.Params("id")
 		obj := reflect.New(reflect.TypeOf(model)).Interface()
 		if err := events.Trigger("BeforeDelete:"+name, obj); err != nil {
@@ -134,7 +158,7 @@ func deleteHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 		}
 
 		if err := db.Delete(obj, id).Error; err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 		}
 
 		if err := events.Trigger("AfterDelete:"+name, obj); err != nil {
@@ -162,4 +186,46 @@ func autoPreload(db *gorm.DB, modelType reflect.Type) *gorm.DB {
 		}
 	}
 	return db
+}
+
+func friendlySQLError(err error, lang string) string {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return i18n.Translate(lang, "DATA_NOT_FOUND", nil)
+	}
+
+	msg := err.Error()
+
+	// Case 1: Foreign key constraint
+	if strings.Contains(msg, "foreign key constraint fails") {
+		// Cari nama kolom foreign key-nya kalau ada
+		re := regexp.MustCompile("FOREIGN KEY \\(`(.*?)`\\)")
+		matches := re.FindStringSubmatch(msg)
+		if len(matches) > 1 {
+			return i18n.Translate(lang, "INVALID_FIELD_REQUIRED", map[string]interface{}{"field": matches[1]})
+		}
+		return i18n.Translate(lang, "INVALID_REFERENCE", nil)
+	}
+
+	// Case 2: Duplicate entry
+	if strings.Contains(msg, "Duplicate entry") {
+		re := regexp.MustCompile("Duplicate entry '(.*?)'")
+		matches := re.FindStringSubmatch(msg)
+		if len(matches) > 1 {
+			return i18n.Translate(lang, "INVALID_DATA_EXISTS", map[string]interface{}{"field": matches[1]})
+		}
+		return i18n.Translate(lang, "INVALID_DATA_DUPLICATE", nil)
+	}
+
+	// Case 3: Column cannot be null
+	if strings.Contains(msg, "cannot be null") {
+		re := regexp.MustCompile("Column '(.*?)'")
+		matches := re.FindStringSubmatch(msg)
+		if len(matches) > 1 {
+			return i18n.Translate(lang, "INVALID_FIELD_REQUIRED", map[string]interface{}{"field": matches[1]})
+		}
+		return i18n.Translate(lang, "INVALID_REFERENCE", nil)
+	}
+
+	// Default fallback
+	return utils.FileWithLineNum() + " | " + msg
 }

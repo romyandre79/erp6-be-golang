@@ -8,6 +8,7 @@ import (
 	"erp6-be-golang/core/logger"
 	"erp6-be-golang/core/plugin"
 	"erp6-be-golang/core/storage"
+	"erp6-be-golang/core/i18n"
 	"log"
 	"strconv"
 
@@ -22,6 +23,7 @@ import (
 // @host localhost:8888
 // @BasePath /
 func main() {
+i18n.Init()
 
 	// Load Config from .env
 	log.Print("Check Configuration ... ")
