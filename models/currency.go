@@ -1,6 +1,8 @@
 package models
 
-import "time"
+import (
+  "time"
+)
 
 type Currency struct {
 	Currencyid int `gorm:"column:currencyid;primaryKey" json:"currencyid"`
@@ -8,7 +10,7 @@ type Currency struct {
 	Currencyname string `gorm:"column:currencyname" json:"currencyname"`
 	Symbol string `gorm:"column:symbol" json:"symbol"`
 	I18n string `gorm:"column:i18n" json:"i18n"`
-	Recordstatus int `gorm:"column:recordstatus" json:"recordstatus"`
+	Recordstatus int8 `gorm:"column:recordstatus" json:"recordstatus"`
 	Updatedate time.Time `gorm:"column:updatedate" json:"updatedate"`
 }
 

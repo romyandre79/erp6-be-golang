@@ -12,6 +12,7 @@ import (
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	Language string `json:"language"`
 }
 
 func RegisterRoutes(app *fiber.App, db *gorm.DB) {
@@ -32,7 +33,9 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	admin.Use(AuthMiddleware)
 	{
 		admin.Post("/generate-table", func(c *fiber.Ctx) error { return GenerateTableHandler(c, db) })
+		admin.Post("/generate-multi-table", func(c *fiber.Ctx) error { return GenerateMultiTableHandler(c, db) })
 		admin.Post("/generate-module", func(c *fiber.Ctx) error { return CreateModulesHandler(c, db) })
+		plugin.RegisterModelRoutes(admin, db, models.Language{}, "language")
 		plugin.RegisterModelRoutes(admin, db, models.Useraccess{}, "useraccess")
 	}
 }

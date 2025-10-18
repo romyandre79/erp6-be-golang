@@ -23,8 +23,8 @@ type Company struct {
 	Billto *string `gorm:"column:billto" json:"billto"`
 	Recordstatus int8 `gorm:"column:recordstatus" json:"recordstatus"`
 	Updatedate time.Time `gorm:"column:updatedate" json:"updatedate"`
-	City *City `gorm:"foreignKey:cityid;references:cityid"`
-	Currency *Currency `gorm:"foreignKey:currencyid;references:currencyid"`
+	City City `gorm:"foreignKey:cityid;references:cityid"`
+	Currency Currency `gorm:"foreignKey:currencyid;references:currencyid"`
 }
 
 func (Company) TableName() string {

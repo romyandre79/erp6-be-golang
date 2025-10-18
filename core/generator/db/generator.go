@@ -47,6 +47,25 @@ func GenerateStructWithMeta(db *gorm.DB, table string) error {
 	return GenerateStructTable(table, cols, rels, "./models")
 }
 
+func GenerateStructWithMultiMeta(db *gorm.DB, table []string) error {
+	for _, val := range table {
+
+		cols, err := GetColumns(db, val)
+		if err != nil {
+			return err
+		}
+
+		rels, err := GetRelations(db, val)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("Generating struct for table:", table)
+		GenerateStructTable(val, cols, rels, "./models")
+	}
+	return nil
+}
+
 // ==========================
 // GET COLUMN META
 // ==========================
@@ -213,7 +232,7 @@ type {{.StructName}} struct {
 {{- end }}
 {{- if .Relations }}
 {{- range .Relations }}
-	{{ .FieldName }} *{{ .TargetStruct }} ` + "`gorm:\"foreignKey:{{ .ForeignKey }};references:{{ .TargetColumn }}\"`" + `
+	{{ .FieldName }} {{ .TargetStruct }} ` + "`gorm:\"foreignKey:{{ .ForeignKey }};references:{{ .TargetColumn }}\"`" + `
 {{- end }}
 {{- end }}
 }
@@ -248,7 +267,7 @@ func ({{.StructName}}) TableName() string {
 			IsPrimary:  c.IsPrimary,
 		})
 		switch c.DataType {
-		case "timestamp", "time", "date":
+		case "timestamp", "time", "date", "datetime":
 			if !strings.Contains(importStatement, "time") {
 				importStatement += `  "time"`
 			}
