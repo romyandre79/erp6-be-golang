@@ -34,5 +34,8 @@ func Translate(lang string, messageID string, data map[string]interface{}) strin
 		MessageID:    messageID,
 		TemplateData: data,
 	})
+	if msg == "" {
+		msg = messageID
+	}
 	return msg
 }

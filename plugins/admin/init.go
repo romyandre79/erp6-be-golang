@@ -41,4 +41,7 @@ func init() {
 	InitWfgroup()
 	InitWfstatus()
 	InitTranslog()
+	InitApps()
+	InitAppsCompany()
+	InitAppsMenu()
 }
