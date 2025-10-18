@@ -9,7 +9,7 @@ func InitUseraccess() {
 	events.Register("AfterGet:useraccess", func(data interface{}) error {
 		return nil
 	})
-	events.Register("BeforeSave:useraccess", func(data interface{}) error {
+	events.Register("BseforeSave:useraccess", func(data interface{}) error {
 		return nil
 	})
 	events.Register("AfterSave:useraccess", func(data interface{}) error {

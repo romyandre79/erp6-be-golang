@@ -234,3 +234,7 @@ func GenerateMultiTableHandler(c *fiber.Ctx, db *gorm.DB) error {
 	}
 	return helpers.SuccessResponse(c, "DATA_SAVED", nil)
 }
+
+func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) {
+	// TODO Implementation like Capella php version v510
+}
