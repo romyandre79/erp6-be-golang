@@ -6,7 +6,7 @@ import (
 
 type Expeditionar struct {
 	Expeditionarid   int         `gorm:"column:expeditionarid;primaryKey" json:"expeditionarid"`
-	Expeditionarno   *string     `gorm:"column:expeditionarno" json:"expeditionarno"`
+	Expeditionarno   string      `gorm:"column:expeditionarno" json:"expeditionarno"`
 	Plantid          int         `gorm:"column:plantid" json:"plantid"`
 	Expeditionardate time.Time   `gorm:"column:expeditionardate" json:"expeditionardate"`
 	Soheaderid       int         `gorm:"column:soheaderid" json:"soheaderid"`

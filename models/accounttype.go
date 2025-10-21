@@ -7,10 +7,10 @@ import (
 type Accounttype struct {
 	Accounttypeid       int          `gorm:"column:accounttypeid;primaryKey" json:"accounttypeid"`
 	Accounttypename     string       `gorm:"column:accounttypename" json:"accounttypename"`
-	Parentaccounttypeid *int         `gorm:"column:parentaccounttypeid" json:"parentaccounttypeid"`
+	Parentaccounttypeid int          `gorm:"column:parentaccounttypeid" json:"parentaccounttypeid"`
 	Recordstatus        int8         `gorm:"column:recordstatus" json:"recordstatus"`
 	Updatedate          time.Time    `gorm:"column:updatedate" json:"updatedate"`
-	Accounttype         *Accounttype `gorm:"foreignKey:parentaccounttypeid;references:accounttypeid"`
+	Parentaccounttype   *Accounttype `gorm:"foreignKey:parentaccounttypeid;references:accounttypeid"`
 }
 
 func (Accounttype) TableName() string {

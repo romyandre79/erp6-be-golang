@@ -9,11 +9,11 @@ type Mapelkelasdiskusi struct {
 	Mapelkelasid        int                `gorm:"column:mapelkelasid" json:"mapelkelasid"`
 	Addressbookid       int                `gorm:"column:addressbookid" json:"addressbookid"`
 	Content             string             `gorm:"column:content" json:"content"`
-	Replyid             *int               `gorm:"column:replyid" json:"replyid"`
+	Replyid             int                `gorm:"column:replyid" json:"replyid"`
 	Chatdate            time.Time          `gorm:"column:chatdate" json:"chatdate"`
 	Addressbook         Addressbook        `gorm:"foreignKey:addressbookid;references:addressbookid"`
 	Mapelkelas          Mapelkelas         `gorm:"foreignKey:mapelkelasid;references:mapelkelasid"`
-	Mapelkelasdiskusi   *Mapelkelasdiskusi `gorm:"foreignKey:replyid;references:mapelkelasdiskusiid"`
+	Reply               *Mapelkelasdiskusi `gorm:"foreignKey:replyid;references:mapelkelasdiskusiid"`
 }
 
 func (Mapelkelasdiskusi) TableName() string {
