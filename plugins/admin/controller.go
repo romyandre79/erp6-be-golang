@@ -235,6 +235,29 @@ func GenerateMultiTableHandler(c *fiber.Ctx, db *gorm.DB) error {
 	return helpers.SuccessResponse(c, "DATA_SAVED", nil)
 }
 
-func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) {
-	// TODO Implementation like Capella php version v510
+func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
+	flowName := c.FormValue("flow")
+	search := c.FormValue("search")
+	menuName := c.FormValue("menu")
+
+	if flowName == "" || search == "" || menuName == "" {
+		return helpers.FailResponse(c, 401, "INVALID_FLOW_REQUEST", "INVALID_FLOW_VALUE_REQUEST")
+	}
+
+	IsPermission, err := CheckUserPermission(c, db, menuName, PermWrite)
+	if err != nil || !IsPermission {
+		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+	}
+
+	bSearch, err := strconv.ParseBool(search)
+	if err != nil {
+		return helpers.FailResponse(c, 401, "INVALID_CONVERSION", err.Error())
+	}
+
+	err = gendb.ExecuteFlow(c, db, flowName, bSearch)
+	if err != nil {
+		return helpers.FailResponse(c, 401, "INVALID_FLOW", err.Error())
+	}
+
+	return nil
 }

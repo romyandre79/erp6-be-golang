@@ -6,12 +6,12 @@ import (
 
 type Sfheader struct {
 	Sfheaderid      int         `gorm:"column:sfheaderid;primaryKey" json:"sfheaderid"`
-	Sfno            *string     `gorm:"column:sfno" json:"sfno"`
+	Sfno            string      `gorm:"column:sfno" json:"sfno"`
 	Sfdate          time.Time   `gorm:"column:sfdate" json:"sfdate"`
 	Plantid         int         `gorm:"column:plantid" json:"plantid"`
-	Plantcode       *string     `gorm:"column:plantcode" json:"plantcode"`
+	Plantcode       string      `gorm:"column:plantcode" json:"plantcode"`
 	Addressbookid   int         `gorm:"column:addressbookid" json:"addressbookid"`
-	Pocustno        *string     `gorm:"column:pocustno" json:"pocustno"`
+	Pocustno        string      `gorm:"column:pocustno" json:"pocustno"`
 	Addresstoid     int         `gorm:"column:addresstoid" json:"addresstoid"`
 	Addresspayid    int         `gorm:"column:addresspayid" json:"addresspayid"`
 	Salesid         int         `gorm:"column:salesid" json:"salesid"`
@@ -21,7 +21,7 @@ type Sfheader struct {
 	Isexport        int8        `gorm:"column:isexport" json:"isexport"`
 	Issample        int8        `gorm:"column:issample" json:"issample"`
 	Isavalan        int8        `gorm:"column:isavalan" json:"isavalan"`
-	Headernote      *string     `gorm:"column:headernote" json:"headernote"`
+	Headernote      string      `gorm:"column:headernote" json:"headernote"`
 	Totalbefdisc    float64     `gorm:"column:totalbefdisc" json:"totalbefdisc"`
 	Totalaftdisc    float64     `gorm:"column:totalaftdisc" json:"totalaftdisc"`
 	Pendinganso     float64     `gorm:"column:pendinganso" json:"pendinganso"`

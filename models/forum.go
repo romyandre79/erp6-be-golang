@@ -9,11 +9,11 @@ type Forum struct {
 	Forumtitle    string      `gorm:"column:forumtitle" json:"forumtitle"`
 	Forumcontent  string      `gorm:"column:forumcontent" json:"forumcontent"`
 	Addressbookid int         `gorm:"column:addressbookid" json:"addressbookid"`
-	Replyid       *int        `gorm:"column:replyid" json:"replyid"`
+	Replyid       int         `gorm:"column:replyid" json:"replyid"`
 	Postdate      time.Time   `gorm:"column:postdate" json:"postdate"`
 	Recordstatus  int8        `gorm:"column:recordstatus" json:"recordstatus"`
 	Addressbook   Addressbook `gorm:"foreignKey:addressbookid;references:addressbookid"`
-	Forum         *Forum      `gorm:"foreignKey:replyid;references:forumid"`
+	Replyforum    *Forum      `gorm:"foreignKey:replyid;references:forumid"`
 }
 
 func (Forum) TableName() string {

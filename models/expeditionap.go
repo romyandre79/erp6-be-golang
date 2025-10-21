@@ -6,7 +6,7 @@ import (
 
 type Expeditionap struct {
 	Expeditionapid   int         `gorm:"column:expeditionapid;primaryKey" json:"expeditionapid"`
-	Expeditionapno   *string     `gorm:"column:expeditionapno" json:"expeditionapno"`
+	Expeditionapno   string      `gorm:"column:expeditionapno" json:"expeditionapno"`
 	Plantid          int         `gorm:"column:plantid" json:"plantid"`
 	Expeditionapdate time.Time   `gorm:"column:expeditionapdate" json:"expeditionapdate"`
 	Poheaderid       int         `gorm:"column:poheaderid" json:"poheaderid"`

@@ -14,9 +14,9 @@ type Sqdetail struct {
 	Qty2       float64       `gorm:"column:qty2" json:"qty2"`
 	Uom2id     int           `gorm:"column:uom2id" json:"uom2id"`
 	Price      float64       `gorm:"column:price" json:"price"`
-	Qty3       *float64      `gorm:"column:qty3" json:"qty3"`
-	Uom3id     *int          `gorm:"column:uom3id" json:"uom3id"`
-	Slocid     *int          `gorm:"column:slocid" json:"slocid"`
+	Qty3       float64       `gorm:"column:qty3" json:"qty3"`
+	Uom3id     int           `gorm:"column:uom3id" json:"uom3id"`
+	Slocid     int           `gorm:"column:slocid" json:"slocid"`
 	Toleransi  float64       `gorm:"column:toleransi" json:"toleransi"`
 	Itemnote   string        `gorm:"column:itemnote" json:"itemnote"`
 	Updatedate time.Time     `gorm:"column:updatedate" json:"updatedate"`

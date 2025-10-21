@@ -23,6 +23,8 @@ type Config struct {
 	DBName           string
 	DBIdleConn       string
 	DBMaxConn        string
+	DateToDb         string
+	DateFromDb       string
 	DisableKeepAlive string
 	JwtSecret        string
 	JwtTtlHour       string
@@ -36,6 +38,10 @@ type Config struct {
 	CacheAddr        string
 	CachePass        string
 	CacheDB          string
+	ReportUrl        string
+	ReportUser       string
+	ReportPass       string
+	ReportTime       string
 	SwaggerActive    string
 	StorageType      string
 	WriteBufferSize  string
@@ -64,6 +70,8 @@ func LoadConfig() {
 		DBName:           getEnv("DB_NAME", ""),
 		DBIdleConn:       getEnv("DB_IDLE_CONN", ""),
 		DBMaxConn:        getEnv("DB_MAX_CONN", ""),
+		DateToDb:         getEnv("DATE_TO_DB", ""),
+		DateFromDb:       getEnv("DATE_FROM_DB", ""),
 		DisableKeepAlive: getEnv("DISABLE_KEEP_ALIVE", ""),
 		JwtSecret:        getEnv("JWT_SECRET", ""),
 		JwtTtlHour:       getEnv("JWT_TTL_HOUR", ""),
@@ -78,6 +86,10 @@ func LoadConfig() {
 		CachePass:        getEnv("CACHE_PASS", ""),
 		CacheDB:          getEnv("CACHE_DB", ""),
 		ReadBufferSize:   getEnv("READ_BUFFER_SIZE", ""),
+		ReportUrl:        getEnv("REPORT_URL", ""),
+		ReportUser:       getEnv("REPORT_USER", ""),
+		ReportPass:       getEnv("REPORT_PASS", ""),
+		ReportTime:       getEnv("REPORT_TIME", ""),
 		SwaggerActive:    getEnv("SWAGGER_ACTIVE", ""),
 		StorageType:      getEnv("STORAGE_TYPE", ""),
 		WriteBufferSize:  getEnv("WRITE_BUFFER_SIZE", ""),
@@ -99,6 +111,8 @@ func LoadConfig() {
 	helpers.IsEmptyLog(ConfigApps.DBIdleConn, "DB_IDLE_CONN", true)
 	helpers.IsEmptyLog(ConfigApps.DBMaxConn, "DB_MAX_CONN", true)
 	helpers.IsEmptyLog(ConfigApps.DisableKeepAlive, "DISABLE_KEEP_ALIVE", true)
+	helpers.IsEmptyLog(ConfigApps.DateToDb, "DATE_TO_DB", true)
+	helpers.IsEmptyLog(ConfigApps.DateFromDb, "DATE_FROM_DB", true)
 	helpers.IsEmptyLog(ConfigApps.JwtTtlHour, "JWT_TTL_HOUR", true)
 	helpers.IsEmptyLog(ConfigApps.JwtSecret, "JWT_SECRET", true)
 	helpers.IsEmptyLog(ConfigApps.LogMode, "LOG_MODE", true)
@@ -112,6 +126,10 @@ func LoadConfig() {
 	helpers.IsEmptyLog(ConfigApps.LimiterMax, "LIMITER_MAX", true)
 	helpers.IsEmptyLog(ConfigApps.LimiterExpire, "LIMITER_EXPIRE", true)
 	helpers.IsEmptyLog(ConfigApps.ReadBufferSize, "READ_BUFFER_SIZE", true)
+	helpers.IsEmptyLog(ConfigApps.ReportUrl, "REPORT_URL", true)
+	helpers.IsEmptyLog(ConfigApps.ReportUser, "REPORT_USER", true)
+	helpers.IsEmptyLog(ConfigApps.ReportPass, "REPORT_PASS", true)
+	helpers.IsEmptyLog(ConfigApps.ReportTime, "REPORT_TIME", true)
 	helpers.IsEmptyLog(ConfigApps.SwaggerActive, "SWAGGER_ACTIVE", true)
 	helpers.IsEmptyLog(ConfigApps.StorageType, "STORAGE_TYPE", false)
 	helpers.IsEmptyLog(ConfigApps.WriteBufferSize, "WRITE_BUFFER_SIZE", true)
