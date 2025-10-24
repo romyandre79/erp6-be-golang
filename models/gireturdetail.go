@@ -14,12 +14,12 @@ type Gireturdetail struct {
 	Qty4            float64       `gorm:"column:qty4" json:"qty4"`
 	Uomid           int           `gorm:"column:uomid" json:"uomid"`
 	Uom2id          int           `gorm:"column:uom2id" json:"uom2id"`
-	Uom3id          *int          `gorm:"column:uom3id" json:"uom3id"`
-	Uom4id          *int          `gorm:"column:uom4id" json:"uom4id"`
+	Uom3id          int           `gorm:"column:uom3id" json:"uom3id"`
+	Uom4id          int           `gorm:"column:uom4id" json:"uom4id"`
 	Gidetailid      int           `gorm:"column:gidetailid" json:"gidetailid"`
 	Slocid          int           `gorm:"column:slocid" json:"slocid"`
 	Storagebinid    int           `gorm:"column:storagebinid" json:"storagebinid"`
-	Itemnote        *string       `gorm:"column:itemnote" json:"itemnote"`
+	Itemnote        string        `gorm:"column:itemnote" json:"itemnote"`
 	Updatedate      time.Time     `gorm:"column:updatedate" json:"updatedate"`
 	Gidetail        Gidetail      `gorm:"foreignKey:gidetailid;references:gidetailid"`
 	Product         Product       `gorm:"foreignKey:productid;references:productid"`
