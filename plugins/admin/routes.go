@@ -26,7 +26,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	{
 		//auth
 		auth.Post("/logout", func(c *fiber.Ctx) error { return LogoutHandler(c, db) })
-		auth.Get("/me", func(c *fiber.Ctx) error { return MeHandler(c, db) })
+		auth.Get("/me", func(c *fiber.Ctx) error { return MeHander(c, db) })
 	}
 
 	admin := app.Group("/admin")
