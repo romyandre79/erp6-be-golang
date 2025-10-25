@@ -1,3 +1,0 @@
-# erp6-be-golang/core/generator/db
-core\generator\db\executeflow.go:904:2: declared and not used: wfParameter
-core\generator\db\executeflow.go:905:2: declared and not used: enable

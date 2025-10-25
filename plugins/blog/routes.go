@@ -13,13 +13,15 @@ import (
 // Isi sesuai kebutuhan modul.
 func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	// TODO: implement routes
+	blogAuth := app.Group("/blogAuth")
+	blogAuth.Use(admin.AuthMiddleware)
+	{
+		plugin.RegisterModelRoutes(blogAuth, db, models.Category{}, "category")
+		plugin.RegisterModelRoutes(blogAuth, db, models.Post{}, "post")
+		plugin.RegisterModelRoutes(blogAuth, db, models.Postcomment{}, "postcomment")
+	}
 	blog := app.Group("/blog")
-blog.Use(admin.AuthMiddleware)
-{
-plugin.RegisterModelRoutes(blog, db, models.Category{}, "category")
-plugin.RegisterModelRoutes(blog, db, models.Post{}, "post")
-plugin.RegisterModelRoutes(blog, db, models.Postcomment{}, "postcomment")
-
-}
+	blog.Get("/post", func(c *fiber.Ctx) error { return BlogPostHandler(c, db) })
+	blog.Get("/post/slug", func(c *fiber.Ctx) error { return BlogSlugPostHandler(c, db) })
 
 }

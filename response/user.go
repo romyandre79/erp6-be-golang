@@ -10,3 +10,23 @@ type UserResponse struct {
 	Groups       []GroupResponse     `json:"groups"`
 	Menus        []GroupMenuResponse `json:"menus"`
 }
+
+type GroupMenuResponse struct {
+	MenuAccessID int    `json:"menuaccessid"`
+	MenuName     string `json:"menuname"`
+	MenuCode     string `json:"menucode"`
+	ParentId     *int   `json:"parentid"`
+	IsRead       int    `json:"isread"`
+	IsWrite      int    `json:"iswrite"`
+	IsPost       int    `json:"ispost"`
+	IsReject     int    `json:"isreject"`
+	IsUpload     int    `json:"isupload"`
+	IsDownload   int    `json:"isdownload"`
+	IsPurge      int    `json:"ispurge"`
+}
+
+type GroupResponse struct {
+	GroupAccessID int    `json:"groupaccessid"`
+	GroupName     string `json:"groupname"`
+	Description   string `json:"description"`
+}
