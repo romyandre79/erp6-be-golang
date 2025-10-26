@@ -6,6 +6,7 @@ import (
 	genfile "erp6-be-golang/core/generator/file"
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/models"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -23,16 +24,6 @@ type CustomClaims struct {
 }
 
 // loginHandler godoc
-// @Summary Login
-// @Description Login user dengan username & password
-// @Tags auth
-// @Accept json
-// @Produce json
-// @Param request body loginRequest true "Login Request"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
-// @Router /auth/login [post]
 func LoginHandler(c *fiber.Ctx, db *gorm.DB) error {
 	var body loginRequest
 	if err := c.BodyParser(&body); err != nil {
@@ -79,6 +70,7 @@ func LoginHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "INVALID_TOKEN", err.Error())
 	}
 
+	baseUrl := os.Getenv("LOCAL_BASE_URL") + "useraccess/"
 	// --- STEP 6: Response ---
 	return helpers.SuccessResponse(c, "SUCCESS_LOGIN", fiber.Map{
 		"token": t,
@@ -87,6 +79,7 @@ func LoginHandler(c *fiber.Ctx, db *gorm.DB) error {
 			"username":   user.Username,
 			"realname":   user.Realname,
 			"email":      user.Email,
+			"photo":      baseUrl + user.Userphoto,
 			"languageid": user.Languageid,
 			"language":   user.Language,
 			"themeid":    user.Themeid,
@@ -125,13 +118,30 @@ func MeHander(c *fiber.Ctx, db *gorm.DB) error {
 	})
 }
 
+// menuSingleNameHandler godoc
+func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
+	userID := c.Locals("userid")
+	menuName := c.Query("menuname")
+
+	if userID == nil {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
+	}
+
+	// --- STEP 4: Ambil hanya data menu yang dibolehkan ---
+	var menus models.Menuaccess
+	err := db.
+		Table("menuaccess").
+		Preload("Modules").
+		Where("menuname = ? AND recordstatus = 1", menuName).
+		Find(&menus).Error
+	if err != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
+	}
+
+	return helpers.SuccessResponse(c, "SUCCESS_LOGIN", menus)
+}
+
 // logoutHandler godoc
-// @Summary Logout
-// @Description Logout user (dummy endpoint, nanti bisa update isonline)
-// @Tags auth
-// @Produce json
-// @Success 200 {object} map[string]string
-// @Router /auth/logout [post]
 func LogoutHandler(c *fiber.Ctx, db *gorm.DB) error {
 	userID := c.Locals("userid")
 

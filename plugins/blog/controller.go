@@ -22,7 +22,7 @@ func BlogPostHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return err
 	}
 
-	baseUrl := os.Getenv("LOCAL_BASE_URL")
+	baseUrl := os.Getenv("LOCAL_BASE_URL") + os.Getenv("LOCAL_BASE_PATH")
 	BlogPost := make([]response.Post, len(ModelPost))
 	for i, p := range ModelPost {
 		BlogPost[i] = response.Post{
@@ -63,7 +63,7 @@ func BlogSlugPostHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return err
 	}
 
-	baseUrl := os.Getenv("LOCAL_BASE_URL")
+	baseUrl := os.Getenv("LOCAL_BASE_URL") + os.Getenv("LOCAL_BASE_PATH")
 	var BlogPost = response.Post{
 		Postid:       ModelPost.Postid,
 		Title:        ModelPost.Title,
