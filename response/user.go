@@ -6,6 +6,7 @@ type UserResponse struct {
 	RealName     string              `json:"realname"`
 	Email        string              `json:"email"`
 	Phoneno      string              `json:"phoneno"`
+	Photo        string              `json:"photo"`
 	Language     string              `json:"language"`
 	Groups       []GroupResponse     `json:"groups"`
 	Menus        []GroupMenuResponse `json:"menus"`

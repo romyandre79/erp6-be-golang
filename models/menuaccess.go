@@ -17,7 +17,7 @@ type Menuaccess struct {
 	Recordstatus   int       `gorm:"column:recordstatus" json:"recordstatus"`
 	Menuform       string    `gorm:"column:menuform" json:"menuform"`
 	Updatedate     time.Time `gorm:"column:updatedate" json:"updatedate"`
-	Modules        *Modules  `gorm:"foreignKey:moduleid;references:moduleid"`
+	Modules        Modules   `gorm:"foreignKey:moduleid;references:moduleid"`
 }
 
 func (Menuaccess) TableName() string {
