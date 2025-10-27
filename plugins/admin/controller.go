@@ -132,7 +132,7 @@ func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
 	err := db.
 		Table("menuaccess").
 		Preload("Modules").
-		Where("menuname = ? AND recordstatus = 1", menuName).
+		Where("menuaccess.menuname = ?", menuName).
 		Find(&menus).Error
 	if err != nil {
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())

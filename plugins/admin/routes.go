@@ -61,5 +61,8 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		plugin.RegisterModelRoutes(admin, db, models.Apps{}, "apps")
 		plugin.RegisterModelRoutes(admin, db, models.Appscompany{}, "appscompany")
 		plugin.RegisterModelRoutes(admin, db, models.Appsmenu{}, "appsmenu")
+
+		admin.Get("/getwidget", func(c *fiber.Ctx) error { return DashboardListHandler(c, db) })
+
 	}
 }

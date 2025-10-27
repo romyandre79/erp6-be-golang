@@ -16,6 +16,8 @@ type Widget struct {
 	Installdate   time.Time `gorm:"column:installdate" json:"installdate"`
 	Recordstatus  int8      `gorm:"column:recordstatus" json:"recordstatus"`
 	Updatedate    time.Time `gorm:"column:updatedate" json:"updatedate"`
+
+	Modules *Modules `gorm:"foreignKey:Moduleid;references:Moduleid" json:"modules"`
 }
 
 func (Widget) TableName() string {
