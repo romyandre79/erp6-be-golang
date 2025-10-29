@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/log"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -226,6 +227,7 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 	flowName := c.FormValue("flow")
 	search := c.FormValue("search")
 	menuName := c.FormValue("menu")
+	log.Info(c.FormValue("flow"))
 
 	if flowName == "" || search == "" || menuName == "" {
 		return helpers.FailResponse(c, 401, "INVALID_FLOW_REQUEST", "INVALID_FLOW_VALUE_REQUEST")
