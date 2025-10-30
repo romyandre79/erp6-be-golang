@@ -5,14 +5,15 @@ import (
 	"erp6-be-golang/core/configs"
 	"erp6-be-golang/core/email"
 	"erp6-be-golang/core/helpers"
+	"erp6-be-golang/core/i18n"
 	"erp6-be-golang/core/logger"
 	"erp6-be-golang/core/plugin"
 	"erp6-be-golang/core/storage"
-	"erp6-be-golang/core/i18n"
 	"log"
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
 )
 
 //go:generate go run generate.go
@@ -23,7 +24,7 @@ import (
 // @host localhost:8888
 // @BasePath /
 func main() {
-i18n.Init()
+	i18n.Init()
 
 	// Load Config from .env
 	log.Print("Check Configuration ... ")
@@ -80,6 +81,13 @@ i18n.Init()
 		ReadBufferSize:    ReadBufferSize,
 		WriteBufferSize:   WriteBufferSize,
 	})
+
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     "http://localhost:3000,https://erp6-fe-nuxt-golang.vercel.app/", // URL Nuxt
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
+		AllowCredentials: true,
+	}))
 
 	log.Print("Load Plugin ...")
 	plugin.LoadActivePlugins(db, app)

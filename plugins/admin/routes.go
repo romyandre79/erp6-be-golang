@@ -26,12 +26,13 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	{
 		//auth
 		auth.Post("/logout", func(c *fiber.Ctx) error { return LogoutHandler(c, db) })
-		auth.Get("/me", func(c *fiber.Ctx) error { return MeHandler(c, db) })
+		auth.Get("/me", func(c *fiber.Ctx) error { return MeHander(c, db) })
 	}
 
 	admin := app.Group("/admin")
 	admin.Use(AuthMiddleware)
 	{
+		admin.Get("/getmenu", func(c *fiber.Ctx) error { return MenuSingleNameHandler(c, db) })
 		admin.Post("/generate-table", func(c *fiber.Ctx) error { return GenerateTableHandler(c, db) })
 		admin.Post("/generate-multi-table", func(c *fiber.Ctx) error { return GenerateMultiTableHandler(c, db) })
 		admin.Post("/generate-module", func(c *fiber.Ctx) error { return CreateModulesHandler(c, db) })
@@ -60,5 +61,8 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		plugin.RegisterModelRoutes(admin, db, models.Apps{}, "apps")
 		plugin.RegisterModelRoutes(admin, db, models.Appscompany{}, "appscompany")
 		plugin.RegisterModelRoutes(admin, db, models.Appsmenu{}, "appsmenu")
+
+		admin.Get("/getwidget", func(c *fiber.Ctx) error { return DashboardListHandler(c, db) })
+
 	}
 }

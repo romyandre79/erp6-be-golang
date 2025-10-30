@@ -6,12 +6,13 @@ import (
 	genfile "erp6-be-golang/core/generator/file"
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/models"
-	"erp6-be-golang/response"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/log"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -24,43 +25,36 @@ type CustomClaims struct {
 }
 
 // loginHandler godoc
-// @Summary Login
-// @Description Login user dengan username & password
-// @Tags auth
-// @Accept json
-// @Produce json
-// @Param request body loginRequest true "Login Request"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
-// @Router /auth/login [post]
 func LoginHandler(c *fiber.Ctx, db *gorm.DB) error {
 	var body loginRequest
 	if err := c.BodyParser(&body); err != nil {
 		return helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_PAYLOAD", err.Error())
 	}
 
+	// --- STEP 1: Ambil data user tanpa preload berat ---
 	var user models.Useraccess
-	if err := db.Where("username = ? AND recordstatus = 1", body.Username).
+	if err := db.
+		Joins("join theme on theme.themeid = useraccess.themeid").
+		Joins("join language on language.languageid = useraccess.languageid").
+		Where("useraccess.username = ? AND useraccess.recordstatus = 1", body.Username).
 		First(&user).Error; err != nil {
 		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_USER", err.Error())
 	}
 
-	// cek password
+	// --- STEP 2: Validasi password ---
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(body.Password)); err != nil {
 		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_PASSWORD", err.Error())
 	}
 
-	// update last login
+	// --- STEP 3: Update last login ---
 	user.Lastlogin = time.Now()
 	user.Isonline = 1
 	_ = db.Save(&user)
 
-	// TTL dari env
+	// --- STEP 5: Buat token JWT ---
 	tokenTTL := configs.ConfigApps.JwtTtlHour
 	ttl, _ := strconv.Atoi(tokenTTL)
 
-	// ✅ Gunakan RegisteredClaims (bukan MapClaims)
 	claims := CustomClaims{
 		UserID:   uint(user.Useraccessid),
 		Username: user.Username,
@@ -72,12 +66,13 @@ func LoginHandler(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-
 	t, err := token.SignedString([]byte(configs.ConfigApps.JwtSecret))
 	if err != nil {
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "INVALID_TOKEN", err.Error())
 	}
 
+	baseUrl := os.Getenv("LOCAL_BASE_URL") + "useraccess/"
+	// --- STEP 6: Response ---
 	return helpers.SuccessResponse(c, "SUCCESS_LOGIN", fiber.Map{
 		"token": t,
 		"user": fiber.Map{
@@ -85,6 +80,7 @@ func LoginHandler(c *fiber.Ctx, db *gorm.DB) error {
 			"username":   user.Username,
 			"realname":   user.Realname,
 			"email":      user.Email,
+			"photo":      baseUrl + user.Userphoto,
 			"languageid": user.Languageid,
 			"language":   user.Language,
 			"themeid":    user.Themeid,
@@ -93,13 +89,60 @@ func LoginHandler(c *fiber.Ctx, db *gorm.DB) error {
 	})
 }
 
+func MeHander(c *fiber.Ctx, db *gorm.DB) error {
+	userID := c.Locals("userid")
+
+	if userID == nil {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
+	}
+
+	// --- STEP 4: Ambil hanya data menu yang dibolehkan ---
+	var menus []models.Menuaccess
+	err := db.
+		Table("usergroup").
+		Select(`
+			DISTINCT m.menuaccessid, m.menuname, m.menucode, m.menuform, m.menutype, m.description, m.parentid, m.menuicon, m.menuurl, m.sortorder, n.moduleid, n.modulename
+		`).
+		Joins("JOIN groupaccess g ON g.groupaccessid = usergroup.groupaccessid").
+		Joins("JOIN groupmenu gm ON gm.groupaccessid = g.groupaccessid").
+		Joins("JOIN menuaccess m ON m.menuaccessid = gm.menuaccessid").
+		Joins("JOIN modules n ON n.moduleid = m.moduleid").
+		Where("usergroup.useraccessid = ? AND m.recordstatus = 1 AND gm.isread = 1", userID).
+		Order("m.parentid asc, m.sortorder ASC").
+		Scan(&menus).Error
+	if err != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
+	}
+
+	return helpers.SuccessResponse(c, "SUCCESS_LOGIN", fiber.Map{
+		"menus": menus,
+	})
+}
+
+// menuSingleNameHandler godoc
+func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
+	userID := c.Locals("userid")
+	menuName := c.Query("menuname")
+
+	if userID == nil {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
+	}
+
+	// --- STEP 4: Ambil hanya data menu yang dibolehkan ---
+	var menus models.Menuaccess
+	err := db.
+		Table("menuaccess").
+		Preload("Modules").
+		Where("menuaccess.menuname = ?", menuName).
+		Find(&menus).Error
+	if err != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
+	}
+
+	return helpers.SuccessResponse(c, "SUCCESS_LOGIN", menus)
+}
+
 // logoutHandler godoc
-// @Summary Logout
-// @Description Logout user (dummy endpoint, nanti bisa update isonline)
-// @Tags auth
-// @Produce json
-// @Success 200 {object} map[string]string
-// @Router /auth/logout [post]
 func LogoutHandler(c *fiber.Ctx, db *gorm.DB) error {
 	userID := c.Locals("userid")
 
@@ -121,61 +164,6 @@ func LogoutHandler(c *fiber.Ctx, db *gorm.DB) error {
 	// blacklistToken(claims["jti"].(string))
 
 	return helpers.SuccessResponse(c, "SUCCESS_LOGOUT", nil)
-}
-
-// meHandler godoc
-// @Summary Get current user
-// @Description Mendapatkan user dari JWT token
-// @Tags auth
-// @Produce json
-// @Success 200 {object} map[string]interface{}
-// @Failure 401 {object} map[string]string
-// @Router /auth/me [get]
-func MeHandler(c *fiber.Ctx, db *gorm.DB) error {
-	userID := c.Locals("userid")
-
-	if userID == nil {
-		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
-	}
-
-	var user models.Useraccess
-	if err := db.Debug().
-		Preload("UserGroups.GroupAccess.GroupMenus", "isread = ?", 1).
-		Preload("UserGroups.GroupAccess.GroupMenus.MenuAccess").
-		First(&user, userID).Error; err != nil {
-		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
-	}
-
-	resp := response.UserResponse{
-		UserAccessID: uint(user.Useraccessid),
-		Username:     user.Username,
-		RealName:     user.Realname,
-		Email:        user.Email,
-	}
-
-	for _, g := range user.Usergroups {
-		resp.Groups = append(resp.Groups, response.GroupResponse{
-			GroupAccessID: g.Groupaccess.Groupaccessid,
-			GroupName:     g.Groupaccess.Groupname,
-			Description:   g.Groupaccess.Description,
-		})
-		for _, h := range g.Groupaccess.Groupmenus {
-			resp.Menus = append(resp.Menus, response.GroupMenuResponse{
-				MenuAccessID: h.Menuaccess.Menuaccessid,
-				MenuName:     h.Menuaccess.Menuname,
-				ParentId:     &h.Menuaccess.Parentid,
-				IsRead:       h.Isread,
-				IsWrite:      h.Iswrite,
-				IsPost:       h.Ispost,
-				IsReject:     h.Isreject,
-				IsUpload:     h.Isupload,
-				IsDownload:   h.Isdownload,
-				IsPurge:      h.Ispurge,
-			})
-		}
-	}
-
-	return helpers.SuccessResponse(c, "SUCCESS_DATA_RETRIEVE", resp)
 }
 
 func CreateModulesHandler(c *fiber.Ctx, db *gorm.DB) error {
@@ -239,6 +227,7 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 	flowName := c.FormValue("flow")
 	search := c.FormValue("search")
 	menuName := c.FormValue("menu")
+	log.Info(c.FormValue("flow"))
 
 	if flowName == "" || search == "" || menuName == "" {
 		return helpers.FailResponse(c, 401, "INVALID_FLOW_REQUEST", "INVALID_FLOW_VALUE_REQUEST")

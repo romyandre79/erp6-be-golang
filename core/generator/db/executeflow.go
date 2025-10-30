@@ -253,6 +253,9 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 	whereStat := ""
 	total := make(map[string]interface{})
 	resultStat := make(map[string]interface{})
+	userId := c.Locals("userid")
+	userName := c.Locals("username")
+	userNameStr, _ := userName.(string)
 
 	for _, p := range params {
 		fmt.Printf("Params %+v\n", p)
@@ -267,8 +270,7 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 					if strings.Contains(data, "@") {
 						funcs := strings.Split(data, "@")
 						field := strings.ReplaceAll(funcs[0], "@", "")
-						userName := c.Locals("username")
-						userNameStr, _ := userName.(string)
+						field = strings.ReplaceAll(field, "=", "")
 
 						switch strings.ToLower(funcs[1]) {
 						case "getemployeebycompany":
@@ -285,6 +287,8 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 							object := strings.Split(funcs[1], ">")
 							userObject, _ := getUserObjectValues(db, userNameStr, object[1])
 							whereStat += fmt.Sprintf("%s in (%s)", field, userObject)
+						case "userid":
+							whereStat += fmt.Sprintf("%s = %d", field, userId)
 						}
 					} else if strings.Contains(data, "=") {
 						// Handle ekspresi "="
@@ -355,6 +359,7 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 	if sqlStat == "" {
 		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "INVALID_QUERY")
 	}
+	log.Print(sqlStat)
 	if enable {
 		if err := db.Raw(sqlStat).Scan(&total).Error; err != nil {
 			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
@@ -384,6 +389,8 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "INVALID_QUERY")
 	}
 
+	log.Print(sqlStat)
+
 	if enable {
 		var rows []map[string]interface{}
 		if err := db.Raw(sqlStat).Scan(&rows).Error; err != nil {
@@ -392,6 +399,137 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 		resultStat["data"] = rows
 		resultStat["page"] = GetSearchText(c, []string{"POST", "GET"}, "page", "1", "int")
 		resultStat["rows"] = GetSearchText(c, []string{"POST", "GET"}, "rows", "10", "int")
+		wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
+		helpers.SuccessResponse(c, "DATA_RETRIEVED", resultStat)
+	} else {
+		helpers.SuccessResponse(c, "DATA_RETRIEVED", sqlStat)
+	}
+
+	return nil
+}
+
+func handleSearchRow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
+	fmt.Print("Search")
+	sortStat := ""
+	fromStat := ""
+	orderStat := ""
+	selectStat := ""
+	enable := true
+	leftjoinStat := ""
+	whereStat := ""
+	resultStat := make(map[string]interface{})
+	userId := c.Locals("userid")
+	userName := c.Locals("username")
+	userNameStr, _ := userName.(string)
+	fmt.Print(userId)
+
+	for _, p := range params {
+		fmt.Printf("Params %+v\n", p)
+		switch p.InputName {
+		case "whererow":
+			compValue := strings.TrimSpace(p.CompValue)
+			wheres := strings.Fields(compValue)
+			for _, data := range wheres {
+				dataLower := strings.ToLower(data)
+				if dataLower != "and" && dataLower != "or" {
+					// Cek apakah ada '@' → berarti fungsi dinamis
+					if strings.Contains(data, "@") {
+						funcs := strings.Split(data, "@")
+						field := strings.ReplaceAll(funcs[0], "@", "")
+						field = strings.ReplaceAll(field, "=", "")
+
+						switch strings.ToLower(funcs[1]) {
+						case "getemployeebycompany":
+							listByCompany, _ := getDataByCompany(db, userNameStr, "isemployee")
+							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
+						case "getcustomerbycompany":
+							listByCompany, _ := getDataByCompany(db, userNameStr, "iscustomer")
+							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
+						case "getvendorbycompany":
+							listByCompany, _ := getDataByCompany(db, userNameStr, "isvendor")
+							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
+						case "getuserrecord":
+							// getuserobject atau getuserrecord
+							object := strings.Split(funcs[1], ">")
+							userObject, _ := getUserObjectValues(db, userNameStr, object[1])
+							whereStat += fmt.Sprintf("%s in (%s)", field, userObject)
+						case "userid":
+							whereStat += fmt.Sprintf("%s = %d", field, userId)
+						}
+					} else if strings.Contains(data, "=") {
+						// Handle ekspresi "="
+						datas := strings.SplitN(data, "=", 2)
+						fmt.Printf("datas %+v", datas)
+						left := datas[0]
+						right := datas[1]
+
+						if strings.Contains(right, ":") {
+							key := strings.ReplaceAll(right, ":", "")
+							val := c.Query(key)
+							if val == "" {
+								val = c.FormValue(key)
+							}
+							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, val)
+						} else {
+							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)
+						}
+					} else {
+						// Default → LIKE
+						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, GetSearchText(c, []string{"Q"}, data, "", "string"))
+					}
+				} else {
+					// and / or
+					whereStat += " " + data + " "
+				}
+			}
+		case "sortrow":
+			if p.CompValue != "" {
+				sortStat = strings.Trim(p.CompValue, "")
+			}
+		case "fromrow":
+			if p.CompValue != "" {
+				fromStat = strings.Trim(p.CompValue, "")
+			}
+		case "leftjoinrow":
+			if p.CompValue != "" {
+				leftjoinStat = strings.Trim(p.CompValue, "")
+			}
+		case "selectrow":
+			if p.CompValue != "" {
+				selectStat = strings.Trim(p.CompValue, "")
+			}
+		case "enablerow":
+			if p.CompValue == "false" {
+				enable = false
+			}
+		}
+	}
+
+	sqlStat := "select " + selectStat + " from " + fromStat
+	if leftjoinStat != "" {
+		lefts := strings.Split(leftjoinStat, ",")
+		for _, v := range lefts {
+			sqlStat += " left join " + v
+		}
+	}
+	if whereStat != "" {
+		sqlStat += " where " + whereStat
+	}
+	if sortStat != "" {
+		sqlStat += " order by " + sortStat + " " + orderStat
+	}
+	if sqlStat == "" {
+		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "INVALID_QUERY")
+	}
+
+	fmt.Print(sqlStat)
+
+	if enable {
+		var rows map[string]interface{}
+		if err := db.Raw(sqlStat).Scan(&rows).Error; err != nil {
+			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
+		}
+		resultStat["data"] = rows
 		wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
 		helpers.SuccessResponse(c, "DATA_RETRIEVED", resultStat)
 	} else {
@@ -941,6 +1079,8 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		err = handleSaveLog(c, workflowDetailResult, db, search)
 	case "Search":
 		err = handleSearch(c, workflowDetailResult, db, search)
+	case "SearchRow":
+		err = handleSearchRow(c, workflowDetailResult, db, search)
 	case "StoreProcedure":
 		err = handleStoreProcedure(c, workflowDetailResult, db, search)
 	case "SendEmail":
