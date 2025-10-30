@@ -415,7 +415,6 @@ func handleSearchRow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, s
 	orderStat := ""
 	selectStat := ""
 	enable := true
-	paging := false
 	leftjoinStat := ""
 	whereStat := ""
 	resultStat := make(map[string]interface{})
@@ -1103,8 +1102,6 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		err = handleTable(c, workflowDetailResult, db, search)
 	case "Workflow":
 		err = handleWorkflow(c, workflowDetailResult, db, search)
-	case "End":
-		return err
 	}
 
 	if component.Name == "Search" && search {
