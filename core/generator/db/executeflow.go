@@ -1181,6 +1181,8 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 		return err
 	}
 
+	flowTerminated = false
+
 	// === 2️⃣ Inisialisasi parameter default ===
 	postData := make(map[string]interface{})
 	for _, p := range params {
