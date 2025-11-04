@@ -57,17 +57,18 @@ type IO struct {
 }
 
 type Component struct {
-	ID       int               `json:"id"`
-	Name     string            `json:"name"`
-	Class    string            `json:"class"`
-	HTML     string            `json:"html"`
-	Typenode bool              `json:"typenode"`
-	Inputs   map[string]IO     `json:"inputs"`
-	Outputs  map[string]IO     `json:"outputs"`
-	PosX     float64           `json:"pos_x"`
-	PosY     float64           `json:"pos_y"`
-	Data     map[string]string `json:"data"`
-	IsRun    bool              `json:"isrun"`
+	WorkflowId int               `json:"workflowid"`
+	ID         int               `json:"id"`
+	Name       string            `json:"name"`
+	Class      string            `json:"class"`
+	HTML       string            `json:"html"`
+	Typenode   bool              `json:"typenode"`
+	Inputs     map[string]IO     `json:"inputs"`
+	Outputs    map[string]IO     `json:"outputs"`
+	PosX       float64           `json:"pos_x"`
+	PosY       float64           `json:"pos_y"`
+	Data       map[string]string `json:"data"`
+	IsRun      bool              `json:"isrun"`
 }
 
 type FlowData struct {
@@ -183,11 +184,13 @@ func GetSearchText(c *fiber.Ctx, paramTypes []string, param, defVal, dataType st
 			}
 		case "Q":
 			// Prioritas: GET['q'] > POST['q']
-			if val := c.Query("q"); val != "" {
+			var val string
+			if val = c.Query("q"); val != "" {
 				s = val
-			} else if val := c.FormValue("q"); val != "" {
+			} else if val = c.FormValue("q"); val != "" {
 				s = val
 			}
+			fmt.Printf("%s", val)
 		}
 
 		// Format tanggal, datetime, time
@@ -331,7 +334,9 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 						}
 					} else {
 						// Default → LIKE
-						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, GetSearchText(c, []string{"Q"}, data, "", "string"))
+						funcs := strings.Split(data, ".")
+						fmt.Printf("func %v", funcs)
+						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", funcs[1], GetSearchText(c, []string{"POST"}, funcs[1], "", "string"))
 					}
 				} else {
 					// and / or
@@ -385,6 +390,8 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 			if sqlStat == "" {
 				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "INVALID_QUERY")
 			}
+			fmt.Printf("sql count %v", sqlStat)
+
 			if enable {
 				if err := db.Raw(sqlStat).Scan(&total).Error; err != nil {
 					helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
@@ -416,6 +423,8 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "INVALID_QUERY")
 			}
 
+			fmt.Printf("sql count %v", sqlState)
+
 			if enable {
 				var rows []map[string]interface{}
 				if err := db.Raw(sqlState).Scan(&rows).Error; err != nil {
@@ -423,8 +432,12 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 				}
 				resultStat["data"] = rows
 				if paging {
-					resultStat["page"] = GetSearchText(c, []string{"POST", "GET"}, "page", "1", "int")
-					resultStat["rows"] = GetSearchText(c, []string{"POST", "GET"}, "rows", "10", "int")
+					if len(rows) > 0 {
+						resultStat["page"] = pageStat
+					} else {
+						resultStat["page"] = 0
+					}
+					resultStat["rows"] = rowsStat
 				}
 				wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
 				c.Locals("wfEngine", wfEngine)
@@ -1159,7 +1172,7 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		for _, conn := range outputs.Connections {
 			nextNodeId, _ := strconv.Atoi(conn.Node)
 			for _, nextComp := range components {
-				if nextComp.ID == nextNodeId {
+				if nextComp.ID == nextNodeId && nextComp.WorkflowId == workflowId {
 					return InternalFlow(c, nextComp, workflowId, nextNodeId, db, search)
 				}
 			}
@@ -1172,7 +1185,7 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 			for _, conn := range output.Connections {
 				nextNodeId, _ := strconv.Atoi(conn.Node)
 				for _, nextComp := range components {
-					if nextComp.ID == nextNodeId {
+					if nextComp.ID == nextNodeId && nextComp.WorkflowId == workflowId {
 						err := InternalFlow(c, nextComp, workflowId, nextNodeId, db, search)
 						if err != nil {
 							return err
@@ -1227,6 +1240,7 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 
 	// === 5️⃣ Konversi map → slice agar bisa diurutkan ===
 	for _, comp := range flow.Drawflow.Home.Data {
+		comp.WorkflowId = wf.Workflowid
 		components = append(components, comp)
 	}
 
@@ -1270,6 +1284,7 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 
 		for _, comp := range components {
 			if comp.ID == currID {
+				comp.WorkflowId = wf.Workflowid
 				ordered = append(ordered, comp)
 				break
 			}
@@ -1315,14 +1330,14 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 	c.Locals("flowTerminated", flowTerminated)
 
 	// === 12️⃣ Eksekusi tiap komponen sesuai urutan ===
-	for _, comp := range ordered {
-		if err := InternalFlow(c, comp, int(wf.Workflowid), comp.ID, tx, search); err != nil {
-			if !search {
-				tx.Rollback()
-			}
-			return fmt.Errorf("internal flow failed on component %d (%s): %w", comp.ID, comp.Name, err)
+	//for _, comp := range ordered {
+	if err := InternalFlow(c, ordered[0], int(wf.Workflowid), ordered[0].ID, tx, search); err != nil {
+		if !search {
+			tx.Rollback()
 		}
+		return fmt.Errorf("internal flow failed on component %d (%s): %w", ordered[0].ID, ordered[0].Name, err)
 	}
+	//}
 
 	// === 13️⃣ Commit transaksi ===
 	if !search {
