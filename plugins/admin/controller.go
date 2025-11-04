@@ -139,7 +139,7 @@ func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
 	}
 
-	return helpers.SuccessResponse(c, "SUCCESS_LOGIN", menus)
+	return helpers.SuccessResponse(c, "DATA_RETRIEVED", menus)
 }
 
 // logoutHandler godoc
