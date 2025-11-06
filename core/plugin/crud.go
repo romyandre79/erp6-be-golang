@@ -138,7 +138,7 @@ func listHandler(db *gorm.DB, model interface{}) fiber.Handler {
 			}
 		}
 
-		return helpers.SuccessResponse(c, "DATA_RETRIEVED", fiber.Map{
+		return helpers.SuccessResponse(c, "DATA RETRIEVED", fiber.Map{
 			"data": slicePtr,
 			"meta": meta,
 		})
@@ -162,16 +162,16 @@ func getHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 
 		if err := dbWithPreload.First(obj, id).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
-				return helpers.FailResponse(c, 400, "INVALID_DATA", "DATA_NOT_FOUND")
+				return helpers.FailResponse(c, 400, "INVALID DATA", "DATA NOT_FOUND")
 			}
-			return helpers.FailResponse(c, 400, "INVALID_DATA", err.Error())
+			return helpers.FailResponse(c, 400, "INVALID DATA", err.Error())
 		}
 
 		if err := events.Trigger("AfterGet:"+name, obj); err != nil {
 			return helpers.FailResponse(c, 400, "INVALID_RETRIEVE", err.Error())
 		}
 
-		return helpers.SuccessResponse(c, "DATA_RETRIEVED", obj)
+		return helpers.SuccessResponse(c, "DATA RETRIEVED", obj)
 	}
 }
 
@@ -198,7 +198,7 @@ func createHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 		if err := events.Trigger("AfterCreate:"+name, obj); err != nil {
 			return helpers.FailResponse(c, 400, "INVALID_CREATE", err.Error())
 		}
-		return helpers.SuccessResponse(c, "DATA_SAVED", obj)
+		return helpers.SuccessResponse(c, "DATA SAVED", obj)
 	}
 }
 
@@ -234,7 +234,7 @@ func updateHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 			return helpers.FailResponse(c, 400, "INVALID_UPDATE", err.Error())
 		}
 
-		return helpers.SuccessResponse(c, "DATA_UPDATED", obj)
+		return helpers.SuccessResponse(c, "DATA UPDATED", obj)
 	}
 }
 
@@ -258,7 +258,7 @@ func deleteHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 			return helpers.FailResponse(c, 400, "INVALID_DELETE", err.Error())
 		}
 
-		return helpers.SuccessResponse(c, "DATA_DELETED", obj)
+		return helpers.SuccessResponse(c, "DATA DELETED", obj)
 	}
 }
 
@@ -283,7 +283,7 @@ func autoPreload(db *gorm.DB, modelType reflect.Type) *gorm.DB {
 
 func friendlySQLError(err error, lang string) string {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return i18n.Translate(lang, "DATA_NOT_FOUND", nil)
+		return i18n.Translate(lang, "DATA NOT_FOUND", nil)
 	}
 
 	msg := err.Error()
@@ -304,9 +304,9 @@ func friendlySQLError(err error, lang string) string {
 		re := regexp.MustCompile("Duplicate entry '(.*?)'")
 		matches := re.FindStringSubmatch(msg)
 		if len(matches) > 1 {
-			return i18n.Translate(lang, "INVALID_DATA_EXISTS", map[string]interface{}{"field": matches[1]})
+			return i18n.Translate(lang, "INVALID DATA EXISTS", map[string]interface{}{"field": matches[1]})
 		}
-		return i18n.Translate(lang, "INVALID_DATA_DUPLICATE", nil)
+		return i18n.Translate(lang, "INVALID DATA DUPLICATE", nil)
 	}
 
 	// Case 3: Column cannot be null

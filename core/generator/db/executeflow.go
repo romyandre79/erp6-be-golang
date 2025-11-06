@@ -335,7 +335,6 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 					} else {
 						// Default → LIKE
 						funcs := strings.Split(data, ".")
-						fmt.Printf("func %v", funcs)
 						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", funcs[1], GetSearchText(c, []string{"POST"}, funcs[1], "", "string"))
 					}
 				} else {
@@ -441,13 +440,13 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 				}
 				wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
 				c.Locals("wfEngine", wfEngine)
-				helpers.SuccessResponse(c, "DATA_RETRIEVED", resultStat)
+				helpers.SuccessResponse(c, "DATA RETRIEVED", resultStat)
 			}
 		} else {
-			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_DATA_RETRIEVED", "EMPTY_QUERY")
+			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA RETRIEVED", "EMPTY_QUERY")
 		}
 	} else {
-		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_DATA_RETRIEVED", "EMPTY_QUERY")
+		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA RETRIEVED", "EMPTY_QUERY")
 	}
 
 	return nil
@@ -517,7 +516,8 @@ func handleSearchRow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, s
 						}
 					} else {
 						// Default → LIKE
-						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, GetSearchText(c, []string{"Q"}, data, "", "string"))
+						funcs := strings.Split(data, ".")
+						whereStat += fmt.Sprintf("%s = '%s'", funcs[1], c.FormValue(funcs[1]))
 					}
 				} else {
 					// and / or
@@ -564,18 +564,23 @@ func handleSearchRow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, s
 		if sqlStat == "" {
 			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "INVALID_QUERY")
 		}
+		fmt.Printf("sql %s", sqlStat)
 
 		if enable {
 			var rows map[string]interface{}
 			if err := db.Raw(sqlStat).Scan(&rows).Error; err != nil {
 				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
 			}
-			resultStat["data"] = rows
-			wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
-			c.Locals("wfEngine", wfEngine)
-			helpers.SuccessResponse(c, "DATA_RETRIEVED", resultStat)
+			if rows != nil {
+				resultStat["data"] = rows
+				wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
+				c.Locals("wfEngine", wfEngine)
+				helpers.SuccessResponse(c, "DATA RETRIEVED", resultStat)
+			} else {
+				helpers.FailResponse(c, 401, "INVALID DATA RETRIEVED", "")
+			}
 		} else {
-			helpers.SuccessResponse(c, "DATA_RETRIEVED", sqlStat)
+			helpers.SuccessResponse(c, "DATA RETRIEVED", sqlStat)
 		}
 	}
 
@@ -619,7 +624,7 @@ func handleStoreProcedure(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.
 	sql := fmt.Sprintf("CALL %s(%s)", procName, strings.Join(placeholders, ","))
 
 	if !enable {
-		helpers.SuccessResponse(c, "DATA_RETRIEVED", sql)
+		helpers.SuccessResponse(c, "DATA RETRIEVED", sql)
 	}
 
 	// Eksekusi stored procedure (dummy)
@@ -671,69 +676,16 @@ func handleSendEmail(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, s
 	return nil
 }
 
-func ReportPrint(c *fiber.Ctx, printType string, reportName string, dataPrint map[string]string) error {
-	lang := c.FormValue("lang")
-	userName := c.Locals("username").(string)
-	dataPrint["j_username"] = configs.ConfigApps.ReportUser
-	dataPrint["j_password"] = configs.ConfigApps.ReportPass
-	dataPrint["titlereport"] = i18n.Translate(lang, reportName, nil)
-	dataPrint["titlerecordstatus"] = i18n.Translate(lang, "RECORD_STATUS", nil)
-	dataPrint["titlecompany"] = configs.ConfigApps.AppName
-	dataPrint["titleuser"] = i18n.Translate(lang, "PRINT_BY", nil) + " " + userName
-	timeOut, _ := strconv.Atoi(configs.ConfigApps.ReportTime)
-
-	data := []byte{}
-	query := url.Values{}
-	for k, v := range dataPrint {
-		query.Add(k, v)
-	}
-
-	switch printType {
-	case "PDF":
-		fullUrl := fmt.Sprintf("%s/%s.pdf?%s", configs.ConfigApps.ReportUrl, reportName, query.Encode())
-		data, err := helpers.GetRemoteData(fullUrl, timeOut)
-		if err != nil {
-			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
-		}
-		if strings.HasPrefix(string(data), "%PDF") {
-			c.Set("Cache-Control", "public")
-			c.Set("Content-Type", "application/pdf")
-			c.Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s.pdf"`, reportName))
-			c.Set("Content-Length", strconv.Itoa(len(data)))
-			return c.Send(data)
-		}
-	case "XLS":
-		fullUrl := fmt.Sprintf("%s/%s.xlsx?%s", configs.ConfigApps.ReportUrl, reportName, query.Encode())
-		data, err := helpers.GetRemoteData(fullUrl, timeOut)
-		if err != nil {
-			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
-		}
-		c.Set("Cache-Control", "public")
-		c.Set("Content-Type", "application/vnd.ms-excel")
-		c.Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s.xlsx"`, reportName))
-		c.Set("Content-Length", strconv.Itoa(len(data)))
-		return c.Send(data)
-	case "CSV":
-		fullUrl := fmt.Sprintf("%s/%s.csv?%s", configs.ConfigApps.ReportUrl, reportName, query.Encode())
-		data, err := helpers.GetRemoteData(fullUrl, timeOut)
-		if err != nil {
-			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
-		}
-		c.Set("Cache-Control", "public")
-		c.Set("Content-Type", "application/vnd.ms-word")
-		c.Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s.csv"`, reportName))
-		c.Set("Content-Length", strconv.Itoa(len(data)))
-		return c.Send(data)
-	}
-	return c.SendString(string(data))
-}
-
 func handleReportServer(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
-	vParameter := ""
-	vReportName := ""
-	vReportType := ""
-	enable := true
+	var (
+		vParameter  string
+		vReportName string
+		vReportType string
+	)
+
 	dataPrint := make(map[string]string)
+
+	// Ambil parameter dari workflow
 	for _, v := range params {
 		switch v.InputName {
 		case "reportname":
@@ -742,22 +694,69 @@ func handleReportServer(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB
 			vParameter = strings.TrimSpace(v.CompValue)
 		case "reporttype":
 			vReportType = strings.TrimSpace(v.CompValue)
-		case "enablereport":
-			if v.CompValue == "false" {
-				enable = false
-			}
 		}
 	}
+
+	// Parsing parameter tambahan
 	vParams := strings.Split(vParameter, ",")
-	lang := c.FormValue("lang")
 	for _, v := range vParams {
-		dataPrint[v] = GetSearchText(c, []string{"GET"}, v, "", "string")
-		dataPrint["title"+v] = i18n.Translate(lang, v, nil)
+		dataPrint[v] = GetSearchText(c, []string{"POST"}, v, "", "string")
+		dataPrint["title"+v] = v
 	}
-	if enable {
-		return ReportPrint(c, vReportType, vReportName, dataPrint)
+
+	lang := c.FormValue("lang")
+	userName := c.Locals("username").(string)
+	dataPrint["j_username"] = configs.ConfigApps.ReportUser
+	dataPrint["j_password"] = configs.ConfigApps.ReportPass
+	dataPrint["titlereport"] = i18n.Translate(lang, vReportName, nil)
+	dataPrint["titlerecordstatus"] = i18n.Translate(lang, "RECORD_STATUS", nil)
+	dataPrint["titlecompany"] = configs.ConfigApps.AppName
+	dataPrint["titleuser"] = i18n.Translate(lang, "PRINT_BY", nil) + " " + userName
+
+	timeOut, _ := strconv.Atoi(configs.ConfigApps.ReportTime)
+	query := url.Values{}
+	for k, v := range dataPrint {
+		query.Add(k, v)
 	}
-	return nil
+
+	var (
+		fullUrl     string
+		contentType string
+		fileExt     string
+	)
+
+	switch strings.ToUpper(vReportType) {
+	case "PDF":
+		fileExt = "pdf"
+		contentType = "application/pdf"
+	case "XLS", "XLSX":
+		fileExt = "xlsx"
+		contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case "CSV":
+		fileExt = "csv"
+		contentType = "text/csv"
+	default:
+		return helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_REPORT_TYPE", vReportType)
+	}
+
+	fullUrl = fmt.Sprintf("%s/%s.%s?%s", configs.ConfigApps.ReportUrl, vReportName, fileExt, query.Encode())
+
+	data, err := helpers.GetRemoteData(fullUrl, timeOut)
+	if err != nil {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
+	}
+
+	if len(data) == 0 {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "EMPTY_REPORT", vReportName)
+	}
+
+	// Set header agar file langsung di-download
+	c.Set("Cache-Control", "no-cache")
+	c.Set("Content-Type", contentType)
+	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.%s"`, vReportName, fileExt))
+	c.Set("Content-Length", strconv.Itoa(len(data)))
+
+	return c.Send(data)
 }
 
 func cSaveFile(fileHeader *multipart.FileHeader, dest string) error {
@@ -1043,14 +1042,22 @@ func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 		if enable {
 			result := db.Table(tablename).Create(newParam)
 			if result.Error != nil {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_DATA_CREATE", "TABLE "+tablename)
+				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA CREATE", "TABLE "+tablename)
 			}
 
 			var lastID int64
 			db.Raw("SELECT LAST_INSERT_ID()").Scan(&lastID)
 			postData["lastid"] = fmt.Sprint(lastID)
+			helpers.SuccessResponse(c, "DATA SAVED", "")
+		} else {
+			result := db.Table(tablename).Session(&gorm.Session{DryRun: true}).Create(newParam)
+			rawQuery := result.Statement.SQL.String()
+			rawVars := result.Statement.Vars
+			helpers.SuccessResponse(c, "DATA SAVED", map[string]interface{}{
+				"sql":  rawQuery,
+				"vars": rawVars,
+			})
 		}
-		helpers.SuccessResponse(c, "DATA_SAVED", "TABLE "+tablename)
 
 	case "update":
 		idField := listOldParam[0]
@@ -1060,25 +1067,36 @@ func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 		if enable {
 			result := db.Table(tablename).Where(fmt.Sprintf("%s = ?", idField), idValue).Updates(newParam)
 			if result.Error != nil {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_DATA_UPDATE", "TABLE "+tablename)
+				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA UPDATE", "TABLE "+tablename)
 			}
+			helpers.SuccessResponse(c, "DATA SAVED", "")
+		} else {
+			result := db.Table(tablename).Where(fmt.Sprintf("%s = ?", idField), idValue).Session(&gorm.Session{DryRun: true}).Updates(newParam)
+			rawQuery := result.Statement.SQL.String()
+			rawVars := result.Statement.Vars
+			helpers.SuccessResponse(c, "DATA SAVED", map[string]interface{}{
+				"sql":  rawQuery,
+				"vars": rawVars,
+			})
 		}
-		helpers.SuccessResponse(c, "DATA_SAVED", "TABLE "+tablename)
 
 	case "purge":
 		idField := listOldParam[0]
-		idValue := postData["id"]
+		idValue := postData[idField]
+		sqlment := fmt.Sprintf("delete from %s where %s = %s", tablename, idField, idValue)
 
 		if enable {
-			result := db.Table(tablename).Where(fmt.Sprintf("%s = ?", idField), idValue).Delete(nil)
+			result := db.Exec(sqlment)
 			if result.Error != nil {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_DATA_PURGE", "TABLE "+tablename)
+				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA PURGE", "TABLE "+tablename)
 			}
+			helpers.SuccessResponse(c, "DATA SAVED", "")
+		} else {
+			helpers.FailResponse(c, 401, "INVALID_DATA SAVED", sqlment)
 		}
-		helpers.SuccessResponse(c, "DATA_SAVED", "TABLE "+tablename)
 
 	default:
-		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_DATA_UPDATE", "TABLE "+tablename)
+		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA UPDATE", "TABLE "+tablename)
 	}
 	return nil
 }

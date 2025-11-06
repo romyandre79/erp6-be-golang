@@ -1,7 +1,6 @@
 package helpers
 
 import (
-	"erp6-be-golang/core/i18n"
 	"io"
 	"net/http"
 	"time"
@@ -43,26 +42,18 @@ func GetRemoteData(url string, timeoutSeconds int) ([]byte, error) {
 
 // SuccessResponse kirim response sukses
 func SuccessResponse(c *fiber.Ctx, message string, data interface{}) error {
-	lang := c.FormValue("lang")
-	if lang == "" {
-		lang = "id"
-	}
 	return c.Status(fiber.StatusOK).JSON(SuccessData{
 		Code:    fiber.StatusOK,
-		Message: i18n.Translate(lang, message, nil),
+		Message: message,
 		Data:    data,
 	})
 }
 
 // FailResponse kirim response error
 func FailResponse(c *fiber.Ctx, code int, message string, details string) error {
-	lang := c.FormValue("lang")
-	if lang == "" {
-		lang = "id"
-	}
 	return c.Status(code).JSON(ErrorData{
 		Code:    code,
-		Error:   i18n.Translate(lang, message, nil),
-		Details: i18n.Translate(lang, details, nil),
+		Error:   message,
+		Details: details,
 	})
 }
