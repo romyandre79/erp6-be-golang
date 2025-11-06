@@ -77,12 +77,12 @@ func GetColumns(db *gorm.DB, table string) ([]Column, error) {
 	switch driver {
 	case "mysql":
 		query = `
-			SELECT COLUMN_NAME, DATA_TYPE, COLUMN_KEY = 'PRI' AS is_primary, IS_NULLABLE = 'YES' AS is_nullable
+			SELECT COLUMN_NAME, DATA TYPE, COLUMN_KEY = 'PRI' AS is_primary, IS_NULLABLE = 'YES' AS is_nullable
 			FROM INFORMATION_SCHEMA.COLUMNS
 			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`
 	case "postgres":
 		query = `
-			SELECT column_name, data_type, (SELECT EXISTS (
+			SELECT column_name, DATA type, (SELECT EXISTS (
 				SELECT 1 FROM information_schema.table_constraints tc
 				JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
 				WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_name = c.table_name AND kcu.column_name = c.column_name
@@ -93,7 +93,7 @@ func GetColumns(db *gorm.DB, table string) ([]Column, error) {
 		query = fmt.Sprintf("PRAGMA table_info(%s);", table)
 	case "sqlserver":
 		query = `
-			SELECT c.name AS column_name, t.name AS data_type,
+			SELECT c.name AS column_name, t.name AS DATA type,
 			CASE WHEN i.is_primary_key = 1 THEN 1 ELSE 0 END AS is_primary,
 			CASE WHEN c.is_nullable = 1 THEN 1 ELSE 0 END AS is_nullable
 			FROM sys.columns c
@@ -103,7 +103,7 @@ func GetColumns(db *gorm.DB, table string) ([]Column, error) {
 			WHERE c.object_id = OBJECT_ID(?)`
 	case "oracle":
 		query = `
-			SELECT COLUMN_NAME, DATA_TYPE,
+			SELECT COLUMN_NAME, DATA TYPE,
 			CASE WHEN CONSTRAINT_TYPE = 'P' THEN 1 ELSE 0 END AS is_primary,
 			CASE WHEN NULLABLE = 'Y' THEN 1 ELSE 0 END AS is_nullable
 			FROM USER_TAB_COLUMNS

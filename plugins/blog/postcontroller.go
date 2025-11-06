@@ -83,7 +83,7 @@ func BlogPostHandler(c *fiber.Ctx, db *gorm.DB) error {
 			}
 		}
 	}
-	helpers.SuccessResponse(c, "DATA_RETRIEVED", BlogPost)
+	helpers.SuccessResponse(c, "DATA RETRIEVED", BlogPost)
 	return nil
 }
 
@@ -121,6 +121,6 @@ func BlogSlugPostHandler(c *fiber.Ctx, db *gorm.DB) error {
 			BlogPost.Category += "," + v.Category.Slug
 		}
 	}
-	helpers.SuccessResponse(c, "DATA_RETRIEVED", BlogPost)
+	helpers.SuccessResponse(c, "DATA RETRIEVED", BlogPost)
 	return nil
 }
