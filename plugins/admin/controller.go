@@ -6,6 +6,7 @@ import (
 	genfile "erp6-be-golang/core/generator/file"
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/models"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -233,9 +234,46 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return helpers.FailResponse(c, 401, "INVALID_FLOW_REQUEST", "INVALID_FLOW_VALUE_REQUEST")
 	}
 
-	IsPermission, err := CheckUserPermission(c, db, menuName, PermWrite)
-	if err != nil || !IsPermission {
-		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+	if strings.Contains(flowName, "search") {
+		IsPermission, err := CheckUserPermission(c, db, menuName, PermRead)
+		if err != nil || !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
+	}
+
+	if strings.Contains(flowName, "modif") {
+		IsPermission, err := CheckUserPermission(c, db, menuName, PermWrite)
+		if err != nil || !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
+	}
+
+	if strings.Contains(flowName, "purge") {
+		IsPermission, err := CheckUserPermission(c, db, menuName, PermPurge)
+		if err != nil || !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
+	}
+
+	if strings.Contains(flowName, "approve") {
+		IsPermission, err := CheckUserPermission(c, db, menuName, PermPost)
+		if err != nil || !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
+	}
+
+	if strings.Contains(flowName, "reject") {
+		IsPermission, err := CheckUserPermission(c, db, menuName, PermReject)
+		if err != nil || !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
+	}
+
+	if strings.Contains(flowName, "down") {
+		IsPermission, err := CheckUserPermission(c, db, menuName, PermDownload)
+		if err != nil || !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
 	}
 
 	bSearch, err := strconv.ParseBool(search)
@@ -249,4 +287,28 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+func DownTemplateHandler(c *fiber.Ctx, db *gorm.DB) error {
+	menuName := c.FormValue("menu")
+
+	if menuName == "" {
+		return helpers.FailResponse(c, 401, "INVALID_FLOW_REQUEST", "INVALID_FLOW_VALUE_REQUEST")
+	}
+
+	IsPermission, err := CheckUserPermission(c, db, menuName, PermUpload)
+	if err != nil || !IsPermission {
+		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+	}
+
+	filePath := fmt.Sprintf("public/template/%s.xlsx", menuName)
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "TEMPLATE_NOT_FOUND", fmt.Sprintf("Template untuk '%s' tidak ditemukan", menuName))
+	}
+
+	c.Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s_template.xlsx", menuName))
+
+	return c.SendFile(filePath, true)
 }

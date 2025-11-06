@@ -37,6 +37,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Post("/generate-multi-table", func(c *fiber.Ctx) error { return GenerateMultiTableHandler(c, db) })
 		admin.Post("/generate-module", func(c *fiber.Ctx) error { return CreateModulesHandler(c, db) })
 		admin.Post("/execute-flow", func(c *fiber.Ctx) error { return ExecuteFlowHandler(c, db) })
+		admin.Post("/down-template", func(c *fiber.Ctx) error { return DownTemplateHandler(c, db) })
 		plugin.RegisterModelRoutes(admin, db, models.Language{}, "language")
 		plugin.RegisterModelRoutes(admin, db, models.Country{}, "country")
 		plugin.RegisterModelRoutes(admin, db, models.Province{}, "province")
