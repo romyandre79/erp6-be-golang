@@ -139,7 +139,7 @@ func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
 	}
 
-	return helpers.SuccessResponse(c, "SUCCESS_LOGIN", menus)
+	return helpers.SuccessResponse(c, "DATA RETRIEVED", menus)
 }
 
 // logoutHandler godoc
@@ -180,7 +180,7 @@ func CreateModulesHandler(c *fiber.Ctx, db *gorm.DB) error {
 	if err != nil || !IsPermission {
 		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_PLUGIN_GENERATE", err.Error())
 	}
-	return helpers.SuccessResponse(c, "DATA_SAVED", nil)
+	return helpers.SuccessResponse(c, "DATA SAVED", nil)
 }
 
 func GenerateTableHandler(c *fiber.Ctx, db *gorm.DB) error {
@@ -200,7 +200,7 @@ func GenerateTableHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_GENERAL_TABLE", err.Error())
 	}
 
-	return helpers.SuccessResponse(c, "DATA_SAVED", nil)
+	return helpers.SuccessResponse(c, "DATA SAVED", nil)
 }
 
 func GenerateMultiTableHandler(c *fiber.Ctx, db *gorm.DB) error {
@@ -220,7 +220,7 @@ func GenerateMultiTableHandler(c *fiber.Ctx, db *gorm.DB) error {
 	if err != nil {
 		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_GENERAL_TABLE", err.Error())
 	}
-	return helpers.SuccessResponse(c, "DATA_SAVED", nil)
+	return helpers.SuccessResponse(c, "DATA SAVED", nil)
 }
 
 func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {

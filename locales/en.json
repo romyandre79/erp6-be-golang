@@ -1,13 +1,13 @@
 {
-    "DATA_NOT_FOUND": "Data Not Found",
+    "DATA NOT_FOUND": "Data Not Found",
     "INVALID_FIELD_REQUIRED": "Invalid Entry for Field {{.field}} does not exists",
     "INVALID_REFERENCE":"Invalid Entry",
-    "INVALID_DATA_EXISTS": "Data {{.field}} has exists",
-    "INVALID_DATA_DUPLICATE": "Data cannot be duplicate",
+    "INVALID DATA EXISTS": "Data {{.field}} has exists",
+    "INVALID DATA DUPLICATE": "Data cannot be duplicate",
     "INVALID_PLUGIN_GENERATE": "Plugin already exists",
     "INVALID_TOKEN": "Token tidak valid",
     "token has invalid claims: token is expired": "token has invalid claims: token is expired",
-    "DATA_SAVED": "Data Saved",
+    "DATA SAVED": "Data Saved",
     "ABSENCE_RULE": "Absence Rule",
     "ABSENCE_SCHEDULE": "Abssence Schedule",
     "ABSENCE_STATUS": "Absence Status",
@@ -122,7 +122,7 @@
     "INCOME_CASH_BANK_LIST": "Income Cash Bank List",
     "INVENTORY_REPORT": "Inventory Report",
     "INVALID_CREDENTIAL": "Invalid credentials",
-    "INVALID_DATA_RETRIEVED": "Invalid Data Retrieved",
+    "INVALID DATA RETRIEVED": "Invalid Data Retrieved",
     "INVALID_EMAIL": "Invalid email format",
     "INVALID_PASSWORD": "Invalid password",
     "INVALID_USER": "Invalid user",
@@ -278,5 +278,5 @@
     "INVALID_ENTRY_FORMAT": "{entry} not match with current format",
     "INVALID_ENTRY_MATCH": "{entry} not match with {field}",
     "TITLE_UPDATE": "Update Process",
-    "DATA_RETRIEVED": "Data Retrieved"
+    "DATA RETRIEVED": "Data Retrieved"
 }
