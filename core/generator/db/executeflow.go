@@ -827,7 +827,9 @@ func handleImportData(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, 
 	defer f.Close()
 
 	sheet := f.GetSheetName(0)
+	fmt.Printf("heet %s", sheet)
 	rows, err := f.GetRows(sheet)
+	fmt.Printf("ow %v", rows)
 	if err != nil {
 		return err
 	}
@@ -835,6 +837,7 @@ func handleImportData(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, 
 	if len(rows) < 2 {
 		return fmt.Errorf("no data found in Excel")
 	}
+	var sqlStr string
 
 	// 🔹 Jalankan transaksi (rollback kalau error)
 	return db.Transaction(func(tx *gorm.DB) error {
@@ -849,6 +852,7 @@ func handleImportData(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, 
 				colName := strings.TrimSpace(parts[0])
 				colIndex := strings.TrimSpace(parts[1])
 				val, err := f.GetCellValue(sheet, fmt.Sprintf("%s%d", colIndex, i+1))
+
 				if err != nil {
 					continue
 				}
@@ -863,7 +867,6 @@ func handleImportData(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, 
 				}
 			}
 
-			var sqlStr string
 			var params []string
 
 			if isEmpty {
@@ -911,10 +914,15 @@ func handleImportData(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, 
 			for _, p := range params {
 				args = append(args, colMap[p])
 			}
-			if err := tx.Exec(sqlStr, args...).Error; err != nil {
+			if err := tx.Exec(sqlStr).Error; err != nil {
 				log.Printf("Row %d failed: %v", i+1, err)
 				return err // rollback
 			}
+		}
+		if !enable {
+			helpers.FailResponse(c, 401, "INVALID DATA UPLOADED", sqlStr)
+		} else {
+			helpers.SuccessResponse(c, "DATA UPLOADED", "Filename "+fileHeader.Filename+" Size "+fmt.Sprintf("%d", fileHeader.Size))
 		}
 		return nil
 	})
