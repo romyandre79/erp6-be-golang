@@ -335,7 +335,7 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 					} else {
 						// Default → LIKE
 						funcs := strings.Split(data, ".")
-						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", funcs[1], GetSearchText(c, []string{"POST"}, funcs[1], "", "string"))
+						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, GetSearchText(c, []string{"POST"}, funcs[1], "", "string"))
 					}
 				} else {
 					// and / or
