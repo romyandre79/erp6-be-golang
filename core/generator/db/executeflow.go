@@ -317,8 +317,8 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 							whereStat += fmt.Sprintf("%s = %d", field, userId)
 						}
 					} else if strings.Contains(data, "=") {
-						// Handle ekspresi "="
-						datas := strings.SplitN(data, "=", 2)
+						datas := strings.Split(data, "=")
+						fmt.Printf("data %v\n", datas)
 						left := datas[0]
 						right := datas[1]
 
@@ -330,12 +330,16 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 							}
 							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, val)
 						} else {
-							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)
+							if strings.Contains(data, "empty") {
+								whereStat += fmt.Sprintf("%s is null", left)
+							} else {
+								whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)
+							}
 						}
 					} else {
 						// Default → LIKE
 						funcs := strings.Split(data, ".")
-						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", funcs[1], GetSearchText(c, []string{"POST"}, funcs[1], "", "string"))
+						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, GetSearchText(c, []string{"POST"}, funcs[1], "", "string"))
 					}
 				} else {
 					// and / or

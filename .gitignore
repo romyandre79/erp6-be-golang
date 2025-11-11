@@ -32,3 +32,4 @@ uploads/
 # Editor/IDE
 # .idea/
 # .vscode/
+public/template/*.fiber.gz
