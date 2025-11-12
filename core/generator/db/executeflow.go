@@ -1055,6 +1055,7 @@ func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 			result := db.Table(tablename).Create(newParam)
 			if result.Error != nil {
 				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA CREATE", "TABLE "+tablename)
+				return result.Error
 			}
 
 			var lastID int64
@@ -1080,6 +1081,7 @@ func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 			result := db.Table(tablename).Where(fmt.Sprintf("%s = ?", idField), idValue).Updates(newParam)
 			if result.Error != nil {
 				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA UPDATE", "TABLE "+tablename)
+				return result.Error
 			}
 			helpers.SuccessResponse(c, "DATA SAVED", "")
 		} else {
@@ -1101,6 +1103,7 @@ func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 			result := db.Exec(sqlment)
 			if result.Error != nil {
 				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA PURGE", "TABLE "+tablename)
+				return result.Error
 			}
 			helpers.SuccessResponse(c, "DATA SAVED", "")
 		} else {
