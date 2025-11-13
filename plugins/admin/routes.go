@@ -9,6 +9,8 @@ import (
 	"gorm.io/gorm"
 )
 
+var mediaRoot = "./public"
+
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -38,6 +40,8 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Post("/generate-module", func(c *fiber.Ctx) error { return CreateModulesHandler(c, db) })
 		admin.Post("/execute-flow", func(c *fiber.Ctx) error { return ExecuteFlowHandler(c, db) })
 		admin.Post("/down-template", func(c *fiber.Ctx) error { return DownTemplateHandler(c, db) })
+		admin.Post("/down-template", func(c *fiber.Ctx) error { return DownTemplateHandler(c, db) })
+		admin.Get("/getwidget", func(c *fiber.Ctx) error { return DashboardListHandler(c, db) })
 		plugin.RegisterModelRoutes(admin, db, models.Language{}, "language")
 		plugin.RegisterModelRoutes(admin, db, models.Country{}, "country")
 		plugin.RegisterModelRoutes(admin, db, models.Province{}, "province")
@@ -63,7 +67,16 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		plugin.RegisterModelRoutes(admin, db, models.Appscompany{}, "appscompany")
 		plugin.RegisterModelRoutes(admin, db, models.Appsmenu{}, "appsmenu")
 
-		admin.Get("/getwidget", func(c *fiber.Ctx) error { return DashboardListHandler(c, db) })
+	}
 
+	media := app.Group("/media")
+	media.Use(AuthMiddleware)
+	{
+		media.Get("/", ListMedia)
+		media.Post("/upload", UploadMedia)
+		media.Delete("/delete", DeleteMedia)
+		media.Post("/rename", RenameMedia)
+		media.Post("/folder", CreateFolder)
+		media.Get("/preview", PreviewMedia)
 	}
 }
