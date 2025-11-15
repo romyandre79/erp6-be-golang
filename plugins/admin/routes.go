@@ -2,9 +2,6 @@
 package admin
 
 import (
-	"erp6-be-golang/core/plugin"
-	"erp6-be-golang/models"
-
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
@@ -41,32 +38,6 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Post("/execute-flow", func(c *fiber.Ctx) error { return ExecuteFlowHandler(c, db) })
 		admin.Post("/down-template", func(c *fiber.Ctx) error { return DownTemplateHandler(c, db) })
 		admin.Post("/down-template", func(c *fiber.Ctx) error { return DownTemplateHandler(c, db) })
-		admin.Get("/getwidget", func(c *fiber.Ctx) error { return DashboardListHandler(c, db) })
-		plugin.RegisterModelRoutes(admin, db, models.Language{}, "language")
-		plugin.RegisterModelRoutes(admin, db, models.Country{}, "country")
-		plugin.RegisterModelRoutes(admin, db, models.Province{}, "province")
-		plugin.RegisterModelRoutes(admin, db, models.City{}, "city")
-		plugin.RegisterModelRoutes(admin, db, models.Modules{}, "modules")
-		plugin.RegisterModelRoutes(admin, db, models.Currency{}, "currency")
-		plugin.RegisterModelRoutes(admin, db, models.Theme{}, "theme")
-		plugin.RegisterModelRoutes(admin, db, models.Parameter{}, "parameter")
-		plugin.RegisterModelRoutes(admin, db, models.Widget{}, "widget")
-		plugin.RegisterModelRoutes(admin, db, models.Menuaccess{}, "menuaccess")
-		plugin.RegisterModelRoutes(admin, db, models.Groupmenu{}, "groupmenu")
-		plugin.RegisterModelRoutes(admin, db, models.Menuauth{}, "menuauth")
-		plugin.RegisterModelRoutes(admin, db, models.Groupmenuauth{}, "groupmenuauth")
-		plugin.RegisterModelRoutes(admin, db, models.Useraccess{}, "useraccess")
-		plugin.RegisterModelRoutes(admin, db, models.Usergroup{}, "usergroup")
-		plugin.RegisterModelRoutes(admin, db, models.Snro{}, "snro")
-		plugin.RegisterModelRoutes(admin, db, models.Snrodet{}, "snrodet")
-		plugin.RegisterModelRoutes(admin, db, models.Workflow{}, "workflow")
-		plugin.RegisterModelRoutes(admin, db, models.Wfstatus{}, "wfstatus")
-		plugin.RegisterModelRoutes(admin, db, models.Wfgroup{}, "wfgroup")
-		plugin.RegisterModelRoutes(admin, db, models.Translog{}, "translog")
-		plugin.RegisterModelRoutes(admin, db, models.Apps{}, "apps")
-		plugin.RegisterModelRoutes(admin, db, models.Appscompany{}, "appscompany")
-		plugin.RegisterModelRoutes(admin, db, models.Appsmenu{}, "appsmenu")
-
 	}
 
 	media := app.Group("/media")
