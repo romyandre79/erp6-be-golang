@@ -62,3 +62,30 @@ func DashboardListHandler(c *fiber.Ctx, db *gorm.DB) error {
 
 	return helpers.SuccessResponse(c, "DATA RETRIEVED", menus)
 }
+
+func DashboardSingleHandler(c *fiber.Ctx, db *gorm.DB) error {
+	userID := c.Locals("userid")
+	widgetname := c.Query("widgetname")
+
+	if userID == nil {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
+	}
+
+	var menus response.Widget
+	err := db.
+		Table("widget a").
+		Select(`
+			DISTINCT a.widgetid, a.widgetname, a.widgettitle, a.widgetversion, a.widgetform, a.widgetby, a.description, dashgroup, position, a.moduleid, modulename
+		`).
+		Joins("JOIN userdash b ON b.widgetid = a.widgetid").
+		Joins("JOIN usergroup c ON c.groupaccessid = b.groupaccessid").
+		Joins("JOIN modules d ON d.moduleid = a.moduleid").
+		Where("c.useraccessid = ? AND a.widgetname = ? AND a.recordstatus = 1", userID, widgetname).
+		Order("b.dashgroup, b.position").
+		Scan(&menus).Error
+	if err != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
+	}
+
+	return helpers.SuccessResponse(c, "DATA RETRIEVED", menus)
+}
