@@ -120,29 +120,6 @@ func MeHander(c *fiber.Ctx, db *gorm.DB) error {
 	})
 }
 
-// menuSingleNameHandler godoc
-func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
-	userID := c.Locals("userid")
-	menuName := c.Query("menuname")
-
-	if userID == nil {
-		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
-	}
-
-	// --- STEP 4: Ambil hanya data menu yang dibolehkan ---
-	var menus models.Menuaccess
-	err := db.
-		Table("menuaccess").
-		Preload("Modules").
-		Where("menuaccess.menuname = ?", menuName).
-		Find(&menus).Error
-	if err != nil {
-		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
-	}
-
-	return helpers.SuccessResponse(c, "DATA RETRIEVED", menus)
-}
-
 // logoutHandler godoc
 func LogoutHandler(c *fiber.Ctx, db *gorm.DB) error {
 	userID := c.Locals("userid")
