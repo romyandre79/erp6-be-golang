@@ -203,7 +203,7 @@ func GenerateMultiTableHandler(c *fiber.Ctx, db *gorm.DB) error {
 }
 
 func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
-	flowName := c.FormValue("flow")
+	flowName := c.FormValue("flowname")
 	search := c.FormValue("search")
 	menuName := c.FormValue("menu")
 	log.Info(c.FormValue("flow"))
