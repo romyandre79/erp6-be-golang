@@ -19,9 +19,4 @@ func (h BlogPlugin) Routes(app *fiber.App, db *gorm.DB) {
 
 func init() {
 	plugin.Register(BlogPlugin{})
-
-	Initcategory()
-Initpost()
-Initpostcomment()
-
 }
