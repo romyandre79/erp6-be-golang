@@ -4,5 +4,4 @@ package main
 import (
 	_ "erp6-be-golang/plugins/admin"
 	_ "erp6-be-golang/plugins/blog"
-	_ "erp6-be-golang/plugins/common"
 )
