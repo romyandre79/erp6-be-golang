@@ -1038,7 +1038,11 @@ func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 	for _, key := range listOldParam {
 		if strings.Contains(key, "=") {
 			parts := strings.SplitN(key, "=", 2)
-			newParam[parts[0]] = parts[1]
+			val := c.Query(parts[1])
+			if val == "" {
+				val = c.FormValue(parts[1])
+			}
+			newParam[parts[0]] = val
 		} else {
 			if val, ok := postData[key]; ok {
 				newParam[key] = val
