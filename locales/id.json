@@ -1,11 +1,11 @@
 {
-    "DATA_NOT_FOUND": "Data tidak ditemukan",
+    "DATA NOT_FOUND": "Data tidak ditemukan",
     "INVALID_FIELD_REQUIRED": "Data referensi tidak ditemukan untuk field {{.field}}",
     "INVALID_REFERENCE": "Data referensi tidak ditemukan",
-    "INVALID_DATA_EXISTS": "Data {{.field}} sudah ada",
-    "INVALID_DATA_DUPLICATE": "Data tidak boleh duplikat",
+    "INVALID DATA EXISTS": "Data {{.field}} sudah ada",
+    "INVALID DATA DUPLICATE": "Data tidak boleh duplikat",
     "INVALID_PLUGIN_GENERATE": "Plugin sudah tersedia. Jika ingin menambahkan Model Controller, pergunakan API Generate Model Controller",
     "INVALID_TOKEN": "Token tidak valid",
     "token has invalid claims: token is expired": "Token anda expired. Silakan login ulang",
-    "DATA_SAVED": "Data telah tersimpan"
+    "DATA SAVED": "Data telah tersimpan"
 }

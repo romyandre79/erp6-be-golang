@@ -8,7 +8,7 @@ type Menuaccess struct {
 	Menucode       string    `gorm:"column:menucode" json:"menucode"`
 	Description    string    `gorm:"column:description" json:"description"`
 	Moduleid       int       `gorm:"column:moduleid" json:"moduleid"`
-	Parentid       int       `gorm:"column:parentid" json:"parentid"`
+	Parentid       *int      `gorm:"column:parentid" json:"parentid"`
 	Menuurl        string    `gorm:"column:menuurl" json:"menuurl"`
 	Sortorder      int       `gorm:"column:sortorder" json:"sortorder"`
 	Menuicon       string    `gorm:"column:menuicon" json:"menuicon"`

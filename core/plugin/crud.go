@@ -6,8 +6,10 @@ import (
 	"erp6-be-golang/core/i18n"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -39,16 +41,107 @@ func listHandler(db *gorm.DB, model interface{}) fiber.Handler {
 		if lang == "" {
 			lang = "id"
 		}
+
+		search := c.Query("search", "")
+		page, _ := strconv.Atoi(c.Query("page", "0"))
+		limit, _ := strconv.Atoi(c.Query("limit", "10"))
+		offset, _ := strconv.Atoi(c.Query("offset", "0"))
+
 		modelType := reflect.TypeOf(model)
-		sliceType := reflect.SliceOf(reflect.TypeOf(model))
+		sliceType := reflect.SliceOf(modelType)
 		slicePtr := reflect.New(sliceType).Interface()
 
 		dbWithPreload := autoPreload(db, modelType)
+		query := dbWithPreload.Model(model)
 
-		if err := dbWithPreload.Find(slicePtr).Error; err != nil {
+		// 🔍 General search di semua field string
+		if search != "" {
+			var conditions []string
+			var values []interface{}
+
+			// Loop semua field dari struct
+			for i := 0; i < modelType.NumField(); i++ {
+				field := modelType.Field(i)
+
+				// Abaikan field non-string
+				if field.Type.Kind() != reflect.String {
+					continue
+				}
+
+				// Ambil nama kolom dari tag `gorm:"column:xxx"`
+				columnName := field.Tag.Get("gorm")
+				if columnName == "" {
+					columnName = field.Name
+				} else {
+					// Ekstrak dari format `column:nama_kolom;otherTag`
+					if strings.Contains(columnName, "column:") {
+						parts := strings.Split(columnName, ";")
+						for _, p := range parts {
+							if strings.HasPrefix(p, "column:") {
+								columnName = strings.TrimPrefix(p, "column:")
+								break
+							}
+						}
+					} else {
+						columnName = field.Name
+					}
+				}
+
+				conditions = append(conditions, fmt.Sprintf("%s LIKE ?", columnName))
+				values = append(values, "%"+search+"%")
+			}
+
+			if len(conditions) > 0 {
+				query = query.Where(strings.Join(conditions, " OR "), values...)
+			}
+		}
+
+		// Hitung total
+		var total int64
+		query.Count(&total)
+
+		// Pagination
+		if page > 0 {
+			start := (page - 1) * limit
+			query = query.Offset(start).Limit(limit)
+		} else if offset > 0 {
+			query = query.Offset(offset).Limit(limit)
+		}
+
+		// Eksekusi query
+		if err := query.Find(slicePtr).Error; err != nil {
 			return helpers.FailResponse(c, 400, "INVALID_ERROR", err.Error())
 		}
-		return helpers.SuccessResponse(c, "DATA_RETRIEVED", slicePtr)
+
+		// Meta info
+		var meta fiber.Map
+		if page > 0 {
+			meta = fiber.Map{
+				"page":       page,
+				"limit":      limit,
+				"total":      total,
+				"totalPages": int(math.Ceil(float64(total) / float64(limit))),
+			}
+		} else if offset > 0 {
+			meta = fiber.Map{
+				"offset":  offset,
+				"limit":   limit,
+				"total":   total,
+				"hasMore": (int64(offset) + int64(limit)) < total,
+			}
+		} else {
+			meta = fiber.Map{
+				"page":       1,
+				"limit":      10,
+				"total":      total,
+				"totalPages": int(math.Ceil(float64(total) / float64(limit))),
+			}
+		}
+
+		return helpers.SuccessResponse(c, "DATA RETRIEVED", fiber.Map{
+			"data": slicePtr,
+			"meta": meta,
+		})
 	}
 }
 
@@ -69,16 +162,16 @@ func getHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 
 		if err := dbWithPreload.First(obj, id).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
-				return helpers.FailResponse(c, 400, "INVALID_DATA", "DATA_NOT_FOUND")
+				return helpers.FailResponse(c, 400, "INVALID DATA", "DATA NOT_FOUND")
 			}
-			return helpers.FailResponse(c, 400, "INVALID_DATA", err.Error())
+			return helpers.FailResponse(c, 400, "INVALID DATA", err.Error())
 		}
 
 		if err := events.Trigger("AfterGet:"+name, obj); err != nil {
 			return helpers.FailResponse(c, 400, "INVALID_RETRIEVE", err.Error())
 		}
 
-		return helpers.SuccessResponse(c, "DATA_RETRIEVED", obj)
+		return helpers.SuccessResponse(c, "DATA RETRIEVED", obj)
 	}
 }
 
@@ -105,7 +198,7 @@ func createHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 		if err := events.Trigger("AfterCreate:"+name, obj); err != nil {
 			return helpers.FailResponse(c, 400, "INVALID_CREATE", err.Error())
 		}
-		return helpers.SuccessResponse(c, "DATA_SAVED", obj)
+		return helpers.SuccessResponse(c, "DATA SAVED", obj)
 	}
 }
 
@@ -141,7 +234,7 @@ func updateHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 			return helpers.FailResponse(c, 400, "INVALID_UPDATE", err.Error())
 		}
 
-		return helpers.SuccessResponse(c, "DATA_UPDATED", obj)
+		return helpers.SuccessResponse(c, "DATA UPDATED", obj)
 	}
 }
 
@@ -165,7 +258,7 @@ func deleteHandler(db *gorm.DB, model interface{}, name string) fiber.Handler {
 			return helpers.FailResponse(c, 400, "INVALID_DELETE", err.Error())
 		}
 
-		return helpers.SuccessResponse(c, "DATA_DELETED", obj)
+		return helpers.SuccessResponse(c, "DATA DELETED", obj)
 	}
 }
 
@@ -190,7 +283,7 @@ func autoPreload(db *gorm.DB, modelType reflect.Type) *gorm.DB {
 
 func friendlySQLError(err error, lang string) string {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return i18n.Translate(lang, "DATA_NOT_FOUND", nil)
+		return i18n.Translate(lang, "DATA NOT_FOUND", nil)
 	}
 
 	msg := err.Error()
@@ -211,9 +304,9 @@ func friendlySQLError(err error, lang string) string {
 		re := regexp.MustCompile("Duplicate entry '(.*?)'")
 		matches := re.FindStringSubmatch(msg)
 		if len(matches) > 1 {
-			return i18n.Translate(lang, "INVALID_DATA_EXISTS", map[string]interface{}{"field": matches[1]})
+			return i18n.Translate(lang, "INVALID DATA EXISTS", map[string]interface{}{"field": matches[1]})
 		}
-		return i18n.Translate(lang, "INVALID_DATA_DUPLICATE", nil)
+		return i18n.Translate(lang, "INVALID DATA DUPLICATE", nil)
 	}
 
 	// Case 3: Column cannot be null

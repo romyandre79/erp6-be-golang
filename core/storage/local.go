@@ -49,7 +49,7 @@ func (l *LocalStorage) Delete(path string) error {
 
 func init() {
 	Register(&LocalStorage{
-		BasePath: "./uploads",
-		BaseURL:  "http://localhost:3000/uploads",
+		BasePath: os.Getenv("LOCAL_BASE_PATH"),
+		BaseURL:  os.Getenv("LOCAL_BASE_URL"),
 	})
 }
