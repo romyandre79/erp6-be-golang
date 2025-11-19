@@ -6,6 +6,7 @@ import (
 	genfile "erp6-be-golang/core/generator/file"
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/models"
+	"erp6-be-golang/response"
 	"fmt"
 	"os"
 	"strconv"
@@ -202,7 +203,7 @@ func GenerateMultiTableHandler(c *fiber.Ctx, db *gorm.DB) error {
 }
 
 func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
-	flowName := c.FormValue("flow")
+	flowName := c.FormValue("flowname")
 	search := c.FormValue("search")
 	menuName := c.FormValue("menu")
 	log.Info(c.FormValue("flow"))
@@ -288,4 +289,80 @@ func DownTemplateHandler(c *fiber.Ctx, db *gorm.DB) error {
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s_template.xlsx", menuName))
 
 	return c.SendFile(filePath, true)
+}
+
+func DashboardListHandler(c *fiber.Ctx, db *gorm.DB) error {
+	userID := c.Locals("userid")
+	moduleName := c.Query("module")
+
+	if userID == nil {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
+	}
+
+	var menus []response.Widget
+	err := db.
+		Table("widget a").
+		Select(`
+			DISTINCT a.widgetid, a.widgetname, a.widgettitle, a.widgetversion, a.widgetform, a.widgetby, a.description, dashgroup, position, a.moduleid, modulename
+		`).
+		Joins("JOIN userdash b ON b.widgetid = a.widgetid").
+		Joins("JOIN usergroup c ON c.groupaccessid = b.groupaccessid").
+		Joins("JOIN modules d ON d.moduleid = a.moduleid").
+		Where("c.useraccessid = ? AND d.modulename = ? AND a.recordstatus = 1", userID, moduleName).
+		Order("b.dashgroup, b.position").
+		Scan(&menus).Error
+	if err != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
+	}
+
+	return helpers.SuccessResponse(c, "DATA RETRIEVED", menus)
+}
+
+func DashboardSingleHandler(c *fiber.Ctx, db *gorm.DB) error {
+	userID := c.Locals("userid")
+	widgetname := c.Query("widgetname")
+
+	if userID == nil {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
+	}
+
+	var menus response.Widget
+	err := db.
+		Table("widget a").
+		Select(`
+			DISTINCT a.widgetid, a.widgetname, a.widgettitle, a.widgetversion, a.widgetform, a.widgetby, a.description, dashgroup, position, a.moduleid, modulename
+		`).
+		Joins("JOIN userdash b ON b.widgetid = a.widgetid").
+		Joins("JOIN usergroup c ON c.groupaccessid = b.groupaccessid").
+		Joins("JOIN modules d ON d.moduleid = a.moduleid").
+		Where("c.useraccessid = ? AND a.widgetname = ? AND a.recordstatus = 1", userID, widgetname).
+		Order("b.dashgroup, b.position").
+		Scan(&menus).Error
+	if err != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
+	}
+
+	return helpers.SuccessResponse(c, "DATA RETRIEVED", menus)
+}
+
+func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
+	userID := c.Locals("userid")
+	menuName := c.Query("menuname")
+
+	if userID == nil {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
+	}
+
+	// --- STEP 4: Ambil hanya data menu yang dibolehkan ---
+	var menus models.Menuaccess
+	err := db.
+		Table("menuaccess").
+		Preload("Modules").
+		Where("menuaccess.menuname = ?", menuName).
+		Find(&menus).Error
+	if err != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
+	}
+
+	return helpers.SuccessResponse(c, "DATA RETRIEVED", menus)
 }
