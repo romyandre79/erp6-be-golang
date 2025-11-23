@@ -11,6 +11,7 @@ type Config struct {
 	AppName          string
 	AppEnv           string
 	AppPort          string
+	AllowOrigin      string
 	ReadBufferSize   string
 	CaseSensitive    string
 	Concurrency      string
@@ -59,6 +60,7 @@ func LoadConfig() {
 		AppName:          getEnv("APP_NAME", ""),
 		AppEnv:           getEnv("APP_ENV", ""),
 		AppPort:          getEnv("APP_PORT", ""),
+		AllowOrigin:      getEnv("ALLOW_ORIGIN", ""),
 		BodyLimit:        getEnv("BODY_LIMIT", ""),
 		CaseSensitive:    getEnv("CASE_SENSITIVE", ""),
 		Concurrency:      getEnv("CONCURRENCY", ""),
@@ -99,6 +101,7 @@ func LoadConfig() {
 	helpers.IsEmptyLog(ConfigApps.AppName, "APP_NAME", true)
 	helpers.IsEmptyLog(ConfigApps.AppEnv, "APP_ENV", true)
 	helpers.IsEmptyLog(ConfigApps.AppPort, "APP_PORT", true)
+	helpers.IsEmptyLog(ConfigApps.AppPort, "ALLOW_ORIGIN", true)
 	helpers.IsEmptyLog(ConfigApps.BodyLimit, "BODY_LIMIT", true)
 	helpers.IsEmptyLog(ConfigApps.CaseSensitive, "CASE_SENSITIVE", true)
 	helpers.IsEmptyLog(ConfigApps.Concurrency, "CONCURRENCY", true)
