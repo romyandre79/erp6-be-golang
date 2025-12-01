@@ -335,6 +335,8 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 						} else {
 							if strings.Contains(data, "empty") {
 								whereStat += fmt.Sprintf("%s is null", left)
+							} else if strings.Contains(data, "exist") {
+								whereStat += fmt.Sprintf("exist (%s)", left)
 							} else {
 								whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)
 							}

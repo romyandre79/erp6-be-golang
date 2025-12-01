@@ -37,7 +37,6 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Post("/generate-module", func(c *fiber.Ctx) error { return CreateModulesHandler(c, db) })
 		admin.Post("/execute-flow", func(c *fiber.Ctx) error { return ExecuteFlowHandler(c, db) })
 		admin.Post("/down-template", func(c *fiber.Ctx) error { return DownTemplateHandler(c, db) })
-		admin.Post("/down-template", func(c *fiber.Ctx) error { return DownTemplateHandler(c, db) })
 	}
 
 	media := app.Group("/media")
