@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"bytes"
 	"encoding/json"
 	"erp6-be-golang/core/configs"
 	"erp6-be-golang/core/email"
@@ -9,8 +10,10 @@ import (
 	"erp6-be-golang/models"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"mime/multipart"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -351,6 +354,9 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 				pageStat, _ = strconv.Atoi(GetSearchText(c, []string{"POST", "GET"}, "page", "1", "int"))
 				rowsStat, _ = strconv.Atoi(GetSearchText(c, []string{"POST", "GET"}, "rows", "10", "int"))
 				offsetStat = (pageStat - 1) * rowsStat
+				if offsetStat < 0 {
+					offsetStat = 1
+				}
 				paging = true
 			}
 		case "sort":
@@ -436,7 +442,11 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 				resultStat["data"] = rows
 				if paging {
 					if len(rows) > 0 {
-						resultStat["page"] = pageStat
+						if pageStat == 0 {
+							resultStat["page"] = 1
+						} else {
+							resultStat["page"] = pageStat
+						}
 					} else {
 						resultStat["page"] = 0
 					}
@@ -1142,6 +1152,130 @@ func handleWorkflow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, se
 	}
 }
 
+/*func handleBrevo(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error {
+	var (
+		smtpserver string
+		port       string
+		user       string
+		enable     = true
+	)
+
+	for _, p := range params {
+		switch p.InputName {
+		case "brevosmtpserver":
+			smtpserver = strings.TrimSpace(p.CompValue)
+		case "brevosmtpport":
+			port = strings.TrimSpace(p.CompValue)
+		case "brevosmtplogin":
+			user = strings.ToLower(strings.TrimSpace(p.CompValue))
+		case "enablebrevo":
+			if p.CompValue == "false" {
+				enable = false
+			}
+		}
+	}
+
+	return nil
+}*/
+
+func handleApi(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error {
+	var (
+		apiServer     string
+		parameterName string
+		enable        = true
+	)
+
+	// Ambil nilai dari workflow parameters
+	for _, p := range params {
+		switch strings.ToLower(p.InputName) {
+		case "url":
+			apiServer = strings.TrimSpace(p.CompValue)
+
+		case "parametername":
+			parameterName = strings.TrimSpace(p.CompValue)
+
+		case "enableapi":
+			enable = !(strings.ToLower(p.CompValue) == "false")
+		}
+	}
+
+	// Jika disable dari workflow
+	if !enable {
+		return c.Status(200).JSON(fiber.Map{
+			"status":  "skipped",
+			"message": "API calling disabled by workflow",
+		})
+	}
+
+	// URL wajib ada
+	if apiServer == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error":   "missing_url",
+			"message": "Parameter 'url' belum diisi",
+		})
+	}
+
+	// HTTP client
+	client := &http.Client{
+		Timeout: 20 * time.Second,
+	}
+
+	var (
+		req *http.Request
+		err error
+	)
+
+	// Jika parameter kosong → GET
+	if parameterName == "" {
+		req, err = http.NewRequest("GET", apiServer, nil)
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+	} else {
+		// Jika parameter ada → POST JSON body
+		body := map[string]interface{}{
+			"parameter": parameterName,
+		}
+
+		jsonBody, _ := json.Marshal(body)
+
+		req, err = http.NewRequest("POST", apiServer, bytes.NewBuffer(jsonBody))
+		if err != nil {
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	// Eksekusi call
+	resp, err := client.Do(req)
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{
+			"error":   "api_call_failed",
+			"message": err.Error(),
+		})
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	// Status code error
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return c.Status(resp.StatusCode).JSON(fiber.Map{
+			"error":          "api_error",
+			"http_status":    resp.StatusCode,
+			"response_error": string(respBody),
+		})
+	}
+
+	// Sukses → return hasil API
+	return c.Status(200).JSON(fiber.Map{
+		"status":   "success",
+		"url":      apiServer,
+		"method":   req.Method,
+		"response": json.RawMessage(respBody),
+	})
+}
+
 func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int, db *gorm.DB, search bool) error {
 	var flowTerminated = c.Locals("flowTerminated").(bool)
 	var components = c.Locals("components").([]Component)
@@ -1162,32 +1296,36 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 	}
 
 	var Decision bool
-	switch component.Name {
-	case "Start":
+	switch strings.ToLower(component.Name) {
+	case "start":
 		err = handleStart(c)
-	case "SendMessage":
+	case "sendmessage":
 		err = handleSendMessage(c, workflowDetailResult)
-	case "SaveLog":
+	case "savelog":
 		err = handleSaveLog(c, workflowDetailResult, db, search)
-	case "Search":
+	case "search":
 		err = handleSearch(c, workflowDetailResult, db, search)
-	case "SearchRow":
+	case "searchrow":
 		err = handleSearchRow(c, workflowDetailResult, db, search)
-	case "StoreProcedure":
+	case "storeprocedure":
 		err = handleStoreProcedure(c, workflowDetailResult, db, search)
-	case "SendEmail":
+	case "sendemail":
 		err = handleSendEmail(c, workflowDetailResult, db, search)
-	case "ReportServer":
+	case "reportserver":
 		err = handleReportServer(c, workflowDetailResult, db, search)
-	case "ImportData":
+	case "importdata":
 		file, _ := c.FormFile("file-modules")
 		err = handleImportData(c, workflowDetailResult, db, file, search)
-	case "Decision":
+	case "decision":
 		_, Decision, err = handleDecision(c, workflowDetailResult)
-	case "Table":
+	case "table":
 		err = handleTable(c, workflowDetailResult, db)
-	case "Workflow":
+	case "workflow":
 		err = handleWorkflow(c, workflowDetailResult, db, search)
+	case "api":
+		err = handleApi(c, workflowDetailResult, db)
+	/*case "brevoapi":
+	err = handleBrevo(c, workflowDetailResult, db)*/
 	case "End":
 		flowTerminated = true
 		return nil
