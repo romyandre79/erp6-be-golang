@@ -212,7 +212,7 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return helpers.FailResponse(c, 401, "INVALID_FLOW_REQUEST", "INVALID_FLOW_VALUE_REQUEST")
 	}
 
-	if strings.Contains(flowName, "search") {
+	if !strings.Contains(flowName, "searchcombotheme") {
 		IsPermission, err := CheckUserPermission(c, db, menuName, PermRead)
 		if err != nil || !IsPermission {
 			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
