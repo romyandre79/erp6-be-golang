@@ -1525,12 +1525,3 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 
 	return nil
 }
-
-// ============================
-// Helper
-// ============================
-func toInt(s string) int {
-	var i int
-	fmt.Sscanf(s, "%d", &i)
-	return i
-}

@@ -267,6 +267,15 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 	return nil
 }
 
+func LoadThemeHandler(c *fiber.Ctx, db *gorm.DB) error {
+	err := gendb.ExecuteFlow(c, db, "searchcombotheme", true)
+	if err != nil {
+		return helpers.FailResponse(c, 401, "INVALID_FLOW", err.Error())
+	}
+
+	return nil
+}
+
 func DownTemplateHandler(c *fiber.Ctx, db *gorm.DB) error {
 	menuName := c.FormValue("menu")
 
