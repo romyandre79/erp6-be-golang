@@ -603,6 +603,141 @@ func handleSearchRow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, s
 	return nil
 }
 
+func handleSearchSingle(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
+	sortStat := ""
+	fromStat := ""
+	orderStat := ""
+	selectStat := ""
+	enable := true
+	leftjoinStat := ""
+	whereStat := ""
+	intoSingle := ""
+	resultStat := make(map[string]interface{})
+	userId := c.Locals("userid")
+	userName := c.Locals("username")
+	userNameStr, _ := userName.(string)
+	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+
+	for _, p := range params {
+		switch p.InputName {
+		case "wheresingle":
+			compValue := strings.TrimSpace(p.CompValue)
+			wheres := strings.Fields(compValue)
+			for _, data := range wheres {
+				dataLower := strings.ToLower(data)
+				if dataLower != "and" && dataLower != "or" {
+					// Cek apakah ada '@' → berarti fungsi dinamis
+					if strings.Contains(data, "@") {
+						funcs := strings.Split(data, "@")
+						field := strings.ReplaceAll(funcs[0], "@", "")
+						field = strings.ReplaceAll(field, "=", "")
+
+						switch strings.ToLower(funcs[1]) {
+						case "getemployeebycompany":
+							listByCompany, _ := getDataByCompany(db, userNameStr, "isemployee")
+							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
+						case "getcustomerbycompany":
+							listByCompany, _ := getDataByCompany(db, userNameStr, "iscustomer")
+							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
+						case "getvendorbycompany":
+							listByCompany, _ := getDataByCompany(db, userNameStr, "isvendor")
+							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
+						case "getuserrecord":
+							// getuserobject atau getuserrecord
+							object := strings.Split(funcs[1], ">")
+							userObject, _ := getUserObjectValues(db, userNameStr, object[1])
+							whereStat += fmt.Sprintf("%s in (%s)", field, userObject)
+						case "userid":
+							whereStat += fmt.Sprintf("%s = %d", field, userId)
+						}
+					} else if strings.Contains(data, "=") {
+						// Handle ekspresi "="
+						datas := strings.SplitN(data, "=", 2)
+						left := datas[0]
+						right := datas[1]
+
+						if strings.Contains(right, ":") {
+							key := strings.ReplaceAll(right, ":", "")
+							val := c.Query(key)
+							if val == "" {
+								val = c.FormValue(key)
+							}
+							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, val)
+						} else {
+							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)
+						}
+					} else {
+						// Default → LIKE
+						funcs := strings.Split(data, ".")
+						whereStat += fmt.Sprintf("%s = '%s'", funcs[1], c.FormValue(funcs[1]))
+					}
+				} else {
+					// and / or
+					whereStat += " " + data + " "
+				}
+			}
+		case "intosingle":
+			if p.CompValue != "" {
+				intoSingle = strings.Trim(p.CompValue, "")
+			}
+		case "sortrow":
+			if p.CompValue != "" {
+				sortStat = strings.Trim(p.CompValue, "")
+			}
+		case "fromsingle":
+			if p.CompValue != "" {
+				fromStat = strings.Trim(p.CompValue, "")
+			}
+		case "leftjoinsingle":
+			if p.CompValue != "" {
+				leftjoinStat = strings.Trim(p.CompValue, "")
+			}
+		case "selectsingle":
+			if p.CompValue != "" {
+				selectStat = strings.Trim(p.CompValue, "")
+			}
+		case "enablesingle":
+			if p.CompValue == "false" {
+				enable = false
+			}
+		}
+	}
+
+	if selectStat != "" {
+		sqlStat := "select " + selectStat + " from " + fromStat
+		if leftjoinStat != "" {
+			lefts := strings.SplitSeq(leftjoinStat, ",")
+			for v := range lefts {
+				sqlStat += " left join " + v
+			}
+		}
+		if whereStat != "" {
+			sqlStat += " where " + whereStat
+		}
+		if sortStat != "" {
+			sqlStat += " order by " + sortStat + " " + orderStat
+		}
+		if sqlStat == "" {
+			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "INVALID_QUERY")
+		}
+		fmt.Printf("sql %s", sqlStat)
+
+		if enable {
+			if err := db.Raw(sqlStat).Scan(&intoSingle).Error; err != nil {
+				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
+			}
+			resultStat["data"] = intoSingle
+			wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
+			c.Locals("wfEngine", wfEngine)
+			helpers.SuccessResponse(c, "DATA RETRIEVED", resultStat)
+		} else {
+			helpers.SuccessResponse(c, "DATA RETRIEVED", sqlStat)
+		}
+	}
+
+	return nil
+}
+
 func handleStoreProcedure(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
 	var (
 		procName string
@@ -1307,6 +1442,8 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		err = handleSaveLog(c, workflowDetailResult, db, search)
 	case "search":
 		err = handleSearch(c, workflowDetailResult, db, search)
+	case "searchsingle":
+		err = handleSearchSingle(c, workflowDetailResult, db, search)
 	case "searchrow":
 		err = handleSearchRow(c, workflowDetailResult, db, search)
 	case "storeprocedure":
