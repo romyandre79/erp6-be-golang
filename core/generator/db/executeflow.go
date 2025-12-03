@@ -268,198 +268,351 @@ func getDataByCompany(db *gorm.DB, username string, dataType string) (string, er
 	return cid, nil
 }
 
-func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
-	sortStat := ""
-	fromStat := ""
-	orderStat := ""
-	selectStat := ""
-	enable := true
-	paging := false
-	pageStat := 1
-	rowsStat := 10
-	offsetStat := 0
-	leftjoinStat := ""
+// Helper struct to hold parsed search parameters
+type SearchParams struct {
+	Sort     string
+	From     string
+	Order    string
+	Select   string
+	LeftJoin string
+	Where    string
+	GroupBy  string
+	Enable   bool
+	Paging   bool
+	Page     int
+	Rows     int
+	Offset   int
+}
+
+func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr string, userId interface{}) string {
 	whereStat := ""
-	total := make(map[string]interface{})
-	resultStat := make(map[string]interface{})
-	userId := c.Locals("userid")
-	userName := c.Locals("username")
-	userNameStr, _ := userName.(string)
-	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+	wheres := strings.Fields(compValue)
+	for _, data := range wheres {
+		dataLower := strings.ToLower(data)
+		if dataLower != "and" && dataLower != "or" {
+			// Cek apakah ada '@' → berarti fungsi dinamis
+			if strings.Contains(data, "@") {
+				funcs := strings.Split(data, "@")
+				field := strings.ReplaceAll(funcs[0], "@", "")
+				field = strings.ReplaceAll(field, "=", "")
 
-	for _, p := range params {
-		switch p.InputName {
-		case "where":
-			compValue := strings.TrimSpace(p.CompValue)
-			wheres := strings.Fields(compValue)
-			for _, data := range wheres {
-				dataLower := strings.ToLower(data)
-				if dataLower != "and" && dataLower != "or" {
-					// Cek apakah ada '@' → berarti fungsi dinamis
-					if strings.Contains(data, "@") {
-						funcs := strings.Split(data, "@")
-						field := strings.ReplaceAll(funcs[0], "@", "")
-						field = strings.ReplaceAll(field, "=", "")
+				switch strings.ToLower(funcs[1]) {
+				case "getemployeebycompany":
+					listByCompany, _ := getDataByCompany(db, userNameStr, "isemployee")
+					whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
+				case "getcustomerbycompany":
+					listByCompany, _ := getDataByCompany(db, userNameStr, "iscustomer")
+					whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
+				case "getvendorbycompany":
+					listByCompany, _ := getDataByCompany(db, userNameStr, "isvendor")
+					whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
+				case "getuserrecord":
+					// getuserobject atau getuserrecord
+					object := strings.Split(funcs[1], ">")
+					userObject, _ := getUserObjectValues(db, userNameStr, object[1])
+					whereStat += fmt.Sprintf("%s in (%s)", field, userObject)
+				case "userid":
+					whereStat += fmt.Sprintf("%s = %v", field, userId)
+				}
+			} else if strings.Contains(data, "=") {
+				datas := strings.SplitN(data, "=", 2)
+				left := datas[0]
+				right := datas[1]
 
-						switch strings.ToLower(funcs[1]) {
-						case "getemployeebycompany":
-							listByCompany, _ := getDataByCompany(db, userNameStr, "isemployee")
-							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
-						case "getcustomerbycompany":
-							listByCompany, _ := getDataByCompany(db, userNameStr, "iscustomer")
-							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
-						case "getvendorbycompany":
-							listByCompany, _ := getDataByCompany(db, userNameStr, "isvendor")
-							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
-						case "getuserrecord":
-							// getuserobject atau getuserrecord
-							object := strings.Split(funcs[1], ">")
-							userObject, _ := getUserObjectValues(db, userNameStr, object[1])
-							whereStat += fmt.Sprintf("%s in (%s)", field, userObject)
-						case "userid":
-							whereStat += fmt.Sprintf("%s = %d", field, userId)
-						}
-					} else if strings.Contains(data, "=") {
-						datas := strings.Split(data, "=")
-						fmt.Printf("data %v\n", datas)
-						left := datas[0]
-						right := datas[1]
+				if strings.HasPrefix(strings.ToLower(right), "between:") {
+					// Format: field=between:start:end
+					parts := strings.Split(right, ":")
+					if len(parts) == 3 {
+						start := parts[1]
+						end := parts[2]
 
-						if strings.Contains(right, ":") {
-							key := strings.ReplaceAll(right, ":", "")
+						// Check if values are dynamic (from query/form)
+						if strings.HasPrefix(start, "$") {
+							key := start[1:]
 							val := c.Query(key)
 							if val == "" {
 								val = c.FormValue(key)
 							}
-							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, val)
-						} else {
-							if strings.Contains(data, "empty") {
-								whereStat += fmt.Sprintf("%s is null", left)
-							} else if strings.Contains(data, "exist") {
-								whereStat += fmt.Sprintf("exist (%s)", left)
-							} else {
-								whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)
-							}
+							start = val
 						}
-					} else {
-						// Default → LIKE
-						funcs := strings.Split(data, ".")
-						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, GetSearchText(c, []string{"POST"}, funcs[1], "", "string"))
+						if strings.HasPrefix(end, "$") {
+							key := end[1:]
+							val := c.Query(key)
+							if val == "" {
+								val = c.FormValue(key)
+							}
+							end = val
+						}
+
+						whereStat += fmt.Sprintf("(%s BETWEEN '%s' AND '%s') ", left, start, end)
 					}
+				} else if strings.Contains(right, ":") {
+					key := strings.ReplaceAll(right, ":", "")
+					val := c.Query(key)
+					if val == "" {
+						val = c.FormValue(key)
+					}
+					whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, val)
 				} else {
-					// and / or
+					if strings.Contains(data, "empty") {
+						whereStat += fmt.Sprintf("%s is null", left)
+					} else if strings.Contains(data, "exist") {
+						whereStat += fmt.Sprintf("exist (%s)", left)
+					} else {
+						whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)
+					}
+				}
+			} else {
+				// Default → LIKE
+				if strings.Contains(data, ".") {
+					funcs := strings.Split(data, ".")
+					whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, GetSearchText(c, []string{"POST"}, funcs[1], "", "string"))
+				} else {
 					whereStat += " " + data + " "
 				}
 			}
-		case "paging":
-			if p.CompValue == "true" {
-				pageStat, _ = strconv.Atoi(GetSearchText(c, []string{"POST", "GET"}, "page", "1", "int"))
-				rowsStat, _ = strconv.Atoi(GetSearchText(c, []string{"POST", "GET"}, "rows", "10", "int"))
-				offsetStat = (pageStat - 1) * rowsStat
-				if offsetStat < 0 {
-					offsetStat = 1
-				}
-				paging = true
-			}
-		case "sort":
-			if p.CompValue != "" {
-				sortStat = strings.Trim(p.CompValue, "")
-			}
-		case "from":
-			if p.CompValue != "" {
-				fromStat = strings.Trim(p.CompValue, "")
-			}
-		case "leftjoin":
-			if p.CompValue != "" {
-				leftjoinStat = strings.Trim(p.CompValue, "")
-			}
-		case "select":
-			if p.CompValue != "" {
-				selectStat = strings.Trim(p.CompValue, "")
-			}
-		case "enablesearch":
-			if p.CompValue == "false" {
-				enable = false
-			}
+		} else {
+			// and / or
+			whereStat += " " + data + " "
 		}
 	}
-	if fromStat != "" {
-		if paging {
-			sqlStat := "select count(1) as total from " + fromStat
-			if leftjoinStat != "" {
-				lefts := strings.SplitSeq(leftjoinStat, ",")
+	return whereStat
+}
+
+func parseSelectClause(selectStr string) string {
+	parts := strings.Split(selectStr, ",")
+	var newParts []string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if strings.Contains(part, ":") {
+			subParts := strings.Split(part, ":")
+			if len(subParts) == 2 {
+				field := subParts[0]
+				op := strings.ToLower(subParts[1])
+				switch op {
+				case "count":
+					// Use COUNT(*) or COUNT(1) for special fields, otherwise COUNT(field)
+					if field == "*" || field == "1" {
+						newParts = append(newParts, fmt.Sprintf("COUNT(%s)", field))
+					} else {
+						newParts = append(newParts, fmt.Sprintf("COUNT(%s)", field))
+					}
+				case "sum":
+					newParts = append(newParts, fmt.Sprintf("SUM(%s)", field))
+				case "avg":
+					newParts = append(newParts, fmt.Sprintf("AVG(%s)", field))
+				case "min":
+					newParts = append(newParts, fmt.Sprintf("MIN(%s)", field))
+				case "max":
+					newParts = append(newParts, fmt.Sprintf("MAX(%s)", field))
+				default:
+					newParts = append(newParts, part)
+				}
+			} else if len(subParts) == 3 {
+				// field:op:alias
+				field := subParts[0]
+				op := strings.ToLower(subParts[1])
+				alias := subParts[2]
+				switch op {
+				case "count":
+					// Use COUNT(*) or COUNT(1) for special fields, otherwise COUNT(field)
+					if field == "*" || field == "1" {
+						newParts = append(newParts, fmt.Sprintf("COUNT(%s) as %s", field, alias))
+					} else {
+						newParts = append(newParts, fmt.Sprintf("COUNT(%s) as %s", field, alias))
+					}
+				case "sum":
+					newParts = append(newParts, fmt.Sprintf("SUM(%s) as %s", field, alias))
+				case "avg":
+					newParts = append(newParts, fmt.Sprintf("AVG(%s) as %s", field, alias))
+				case "min":
+					newParts = append(newParts, fmt.Sprintf("MIN(%s) as %s", field, alias))
+				case "max":
+					newParts = append(newParts, fmt.Sprintf("MAX(%s) as %s", field, alias))
+				default:
+					newParts = append(newParts, part)
+				}
+			} else {
+				newParts = append(newParts, part)
+			}
+		} else {
+			newParts = append(newParts, part)
+		}
+	}
+	return strings.Join(newParts, ", ")
+}
+
+func parseSearchParams(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, suffix string) SearchParams {
+	sp := SearchParams{
+		Enable: true,
+		Page:   1,
+		Rows:   10,
+	}
+	userId := c.Locals("userid")
+	userName := c.Locals("username")
+	userNameStr, _ := userName.(string)
+
+	for _, p := range params {
+		name := strings.ToLower(p.InputName)
+		val := strings.TrimSpace(p.CompValue)
+
+		if name == "where"+suffix {
+			sp.Where = parseWhereClause(c, db, val, userNameStr, userId)
+		} else if name == "paging" && suffix == "" { // Paging usually only for main search
+			if val == "true" {
+				sp.Page, _ = strconv.Atoi(GetSearchText(c, []string{"POST", "GET"}, "page", "1", "int"))
+				sp.Rows, _ = strconv.Atoi(GetSearchText(c, []string{"POST", "GET"}, "rows", "10", "int"))
+				sp.Offset = (sp.Page - 1) * sp.Rows
+				if sp.Offset < 0 {
+					sp.Offset = 0
+				}
+				sp.Paging = true
+			}
+		} else if name == "sort"+suffix {
+			sp.Sort = val
+		} else if name == "from"+suffix {
+			sp.From = val
+		} else if name == "leftjoin"+suffix {
+			sp.LeftJoin = val
+		} else if name == "select"+suffix {
+			sp.Select = parseSelectClause(val)
+		} else if name == "groupby"+suffix {
+			sp.GroupBy = val
+		} else if name == "enable"+suffix { // e.g. enablesearch, enablerow
+			if val == "false" {
+				sp.Enable = false
+			}
+		} else if name == "into"+suffix { // for searchsingle
+			// handled in caller or generic function return
+		}
+	}
+	return sp
+}
+
+func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, suffix string, isSingle bool, isRow bool) error {
+	sp := parseSearchParams(c, params, db, suffix)
+	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+	resultStat := make(map[string]interface{})
+
+	if sp.From == "" {
+		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA RETRIEVED", "EMPTY_QUERY")
+		return nil
+	}
+
+	// Count query for paging
+	if sp.Paging && !isSingle && !isRow {
+		var sqlStat string
+
+		// When GROUP BY is used, we need to count the number of groups
+		if sp.GroupBy != "" {
+			// Wrap in subquery to count the groups
+			innerQuery := "select 1 from " + sp.From
+			if sp.LeftJoin != "" {
+				lefts := strings.SplitSeq(sp.LeftJoin, ",")
+				for v := range lefts {
+					innerQuery += " left join " + v
+				}
+			}
+			if sp.Where != "" {
+				innerQuery += " where " + sp.Where
+			}
+			innerQuery += " group by " + sp.GroupBy
+			sqlStat = fmt.Sprintf("select count(1) as total from (%s) as grouped_results", innerQuery)
+		} else {
+			sqlStat = "select count(1) as total from " + sp.From
+			if sp.LeftJoin != "" {
+				lefts := strings.SplitSeq(sp.LeftJoin, ",")
 				for v := range lefts {
 					sqlStat += " left join " + v
 				}
 			}
-			if whereStat != "" {
-				sqlStat += " where " + whereStat
-			}
-			if sortStat != "" {
-				sqlStat += " order by " + sortStat + " " + orderStat
-			}
-			if sqlStat == "" {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "INVALID_QUERY")
-			}
-			fmt.Printf("sql count %v", sqlStat)
-
-			if enable {
-				if err := db.Raw(sqlStat).Scan(&total).Error; err != nil {
-					helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
-				}
-				resultStat = total
-			} else {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", sqlStat)
+			if sp.Where != "" {
+				sqlStat += " where " + sp.Where
 			}
 		}
 
-		if selectStat != "" {
-			sqlState := "select " + selectStat + " from " + fromStat
-			if leftjoinStat != "" {
-				lefts := strings.SplitSeq(leftjoinStat, ",")
-				for v := range lefts {
-					sqlState += " left join " + v
+		if sp.Enable {
+			var total map[string]interface{}
+			if err := db.Raw(sqlStat).Scan(&total).Error; err != nil {
+				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
+				return nil
+			}
+			resultStat = total
+		} else {
+			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", sqlStat)
+			return nil
+		}
+	}
+
+	if sp.Select != "" {
+		sqlState := "select " + sp.Select + " from " + sp.From
+		if sp.LeftJoin != "" {
+			lefts := strings.SplitSeq(sp.LeftJoin, ",")
+			for v := range lefts {
+				sqlState += " left join " + v
+			}
+		}
+		if sp.Where != "" {
+			sqlState += " where " + sp.Where
+		}
+		if sp.GroupBy != "" {
+			sqlState += " group by " + sp.GroupBy
+		}
+		if sp.Sort != "" {
+			sqlState += " order by " + sp.Sort + " " + sp.Order
+		}
+		if sp.Paging && !isSingle && !isRow {
+			sqlState += " limit " + strconv.Itoa(sp.Offset) + ", " + strconv.Itoa(sp.Rows)
+		}
+
+		if sp.Enable {
+			if isSingle {
+				var singleResult string
+				if err := db.Raw(sqlState).Scan(&singleResult).Error; err != nil {
+					helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
+					return nil
 				}
-			}
-			if whereStat != "" {
-				sqlState += " where " + whereStat
-			}
-			if sortStat != "" {
-				sqlState += " order by " + sortStat + " " + orderStat
-			}
-			if paging {
-				sqlState += " limit " + strconv.Itoa(offsetStat) + ", " + strconv.Itoa(rowsStat)
-			}
-			if sqlState == "" {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "INVALID_QUERY")
-			}
-
-			fmt.Printf("sql count %v", sqlState)
-
-			if enable {
+				// For searchsingle, result is put into 'data' key but value is the string result?
+				// Original code: resultStat["data"] = intoSingle
+				resultStat["data"] = singleResult
+			} else if isRow {
+				var rowResult map[string]interface{}
+				if err := db.Raw(sqlState).Scan(&rowResult).Error; err != nil {
+					helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
+					return nil
+				}
+				if rowResult != nil {
+					resultStat["data"] = rowResult
+				} else {
+					helpers.FailResponse(c, 401, "INVALID DATA RETRIEVED", "")
+					return nil
+				}
+			} else {
 				var rows []map[string]interface{}
 				if err := db.Raw(sqlState).Scan(&rows).Error; err != nil {
 					helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
+					return nil
 				}
 				resultStat["data"] = rows
-				if paging {
+				if sp.Paging {
 					if len(rows) > 0 {
-						if pageStat == 0 {
+						if sp.Page == 0 {
 							resultStat["page"] = 1
 						} else {
-							resultStat["page"] = pageStat
+							resultStat["page"] = sp.Page
 						}
 					} else {
 						resultStat["page"] = 0
 					}
-					resultStat["rows"] = rowsStat
+					resultStat["rows"] = sp.Rows
 				}
-				wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
-				c.Locals("wfEngine", wfEngine)
-				helpers.SuccessResponse(c, "DATA RETRIEVED", resultStat)
 			}
+
+			wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
+			c.Locals("wfEngine", wfEngine)
+			helpers.SuccessResponse(c, "DATA RETRIEVED", resultStat)
 		} else {
-			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA RETRIEVED", "EMPTY_QUERY")
+			helpers.SuccessResponse(c, "DATA RETRIEVED", sqlState)
 		}
 	} else {
 		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA RETRIEVED", "EMPTY_QUERY")
@@ -468,139 +621,16 @@ func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, sear
 	return nil
 }
 
+func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
+	return handleGenericSearch(c, params, db, "", false, false)
+}
+
 func handleSearchRow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
-	sortStat := ""
-	fromStat := ""
-	orderStat := ""
-	selectStat := ""
-	enable := true
-	leftjoinStat := ""
-	whereStat := ""
-	resultStat := make(map[string]interface{})
-	userId := c.Locals("userid")
-	userName := c.Locals("username")
-	userNameStr, _ := userName.(string)
-	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+	return handleGenericSearch(c, params, db, "row", false, true)
+}
 
-	for _, p := range params {
-		switch p.InputName {
-		case "whererow":
-			compValue := strings.TrimSpace(p.CompValue)
-			wheres := strings.Fields(compValue)
-			for _, data := range wheres {
-				dataLower := strings.ToLower(data)
-				if dataLower != "and" && dataLower != "or" {
-					// Cek apakah ada '@' → berarti fungsi dinamis
-					if strings.Contains(data, "@") {
-						funcs := strings.Split(data, "@")
-						field := strings.ReplaceAll(funcs[0], "@", "")
-						field = strings.ReplaceAll(field, "=", "")
-
-						switch strings.ToLower(funcs[1]) {
-						case "getemployeebycompany":
-							listByCompany, _ := getDataByCompany(db, userNameStr, "isemployee")
-							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
-						case "getcustomerbycompany":
-							listByCompany, _ := getDataByCompany(db, userNameStr, "iscustomer")
-							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
-						case "getvendorbycompany":
-							listByCompany, _ := getDataByCompany(db, userNameStr, "isvendor")
-							whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
-						case "getuserrecord":
-							// getuserobject atau getuserrecord
-							object := strings.Split(funcs[1], ">")
-							userObject, _ := getUserObjectValues(db, userNameStr, object[1])
-							whereStat += fmt.Sprintf("%s in (%s)", field, userObject)
-						case "userid":
-							whereStat += fmt.Sprintf("%s = %d", field, userId)
-						}
-					} else if strings.Contains(data, "=") {
-						// Handle ekspresi "="
-						datas := strings.SplitN(data, "=", 2)
-						left := datas[0]
-						right := datas[1]
-
-						if strings.Contains(right, ":") {
-							key := strings.ReplaceAll(right, ":", "")
-							val := c.Query(key)
-							if val == "" {
-								val = c.FormValue(key)
-							}
-							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, val)
-						} else {
-							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)
-						}
-					} else {
-						// Default → LIKE
-						funcs := strings.Split(data, ".")
-						whereStat += fmt.Sprintf("%s = '%s'", funcs[1], c.FormValue(funcs[1]))
-					}
-				} else {
-					// and / or
-					whereStat += " " + data + " "
-				}
-			}
-		case "sortrow":
-			if p.CompValue != "" {
-				sortStat = strings.Trim(p.CompValue, "")
-			}
-		case "fromrow":
-			if p.CompValue != "" {
-				fromStat = strings.Trim(p.CompValue, "")
-			}
-		case "leftjoinrow":
-			if p.CompValue != "" {
-				leftjoinStat = strings.Trim(p.CompValue, "")
-			}
-		case "selectrow":
-			if p.CompValue != "" {
-				selectStat = strings.Trim(p.CompValue, "")
-			}
-		case "enablerow":
-			if p.CompValue == "false" {
-				enable = false
-			}
-		}
-	}
-
-	if selectStat != "" {
-		sqlStat := "select " + selectStat + " from " + fromStat
-		if leftjoinStat != "" {
-			lefts := strings.SplitSeq(leftjoinStat, ",")
-			for v := range lefts {
-				sqlStat += " left join " + v
-			}
-		}
-		if whereStat != "" {
-			sqlStat += " where " + whereStat
-		}
-		if sortStat != "" {
-			sqlStat += " order by " + sortStat + " " + orderStat
-		}
-		if sqlStat == "" {
-			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "INVALID_QUERY")
-		}
-		fmt.Printf("sql %s", sqlStat)
-
-		if enable {
-			var rows map[string]interface{}
-			if err := db.Raw(sqlStat).Scan(&rows).Error; err != nil {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
-			}
-			if rows != nil {
-				resultStat["data"] = rows
-				wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
-				c.Locals("wfEngine", wfEngine)
-				helpers.SuccessResponse(c, "DATA RETRIEVED", resultStat)
-			} else {
-				helpers.FailResponse(c, 401, "INVALID DATA RETRIEVED", "")
-			}
-		} else {
-			helpers.SuccessResponse(c, "DATA RETRIEVED", sqlStat)
-		}
-	}
-
-	return nil
+func handleSearchSingle(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
+	return handleGenericSearch(c, params, db, "single", true, false)
 }
 
 func handleStoreProcedure(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
@@ -1154,31 +1184,102 @@ func handleWorkflow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, se
 	}
 }
 
-/*func handleBrevo(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error {
+func handleBrevo(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error {
 	var (
-		smtpserver string
-		port       string
-		user       string
-		enable     = true
+		apiKey  string
+		mailTo  string
+		subject string
+		body    string
+		enable  = true
 	)
 
 	for _, p := range params {
-		switch p.InputName {
-		case "brevosmtpserver":
-			smtpserver = strings.TrimSpace(p.CompValue)
-		case "brevosmtpport":
-			port = strings.TrimSpace(p.CompValue)
-		case "brevosmtplogin":
-			user = strings.ToLower(strings.TrimSpace(p.CompValue))
+		switch strings.ToLower(p.InputName) {
+		case "brevoapikey":
+			apiKey = strings.TrimSpace(p.CompValue)
+		case "mailto":
+			mailTo = strings.TrimSpace(p.CompValue)
+		case "subject":
+			subject = strings.TrimSpace(p.CompValue)
+		case "body":
+			body = strings.TrimSpace(p.CompValue)
 		case "enablebrevo":
-			if p.CompValue == "false" {
+			if strings.EqualFold(p.CompValue, "false") {
 				enable = false
 			}
 		}
 	}
 
-	return nil
-}*/
+	if !enable {
+		return c.Status(200).JSON(fiber.Map{
+			"status":  "skipped",
+			"message": "Brevo email disabled by workflow",
+		})
+	}
+
+	if apiKey == "" {
+		return c.Status(400).JSON(fiber.Map{
+			"error":   "missing_apikey",
+			"message": "Brevo API Key is required",
+		})
+	}
+
+	// Simple Brevo API implementation for sending transactional email
+	url := "https://api.brevo.com/v3/smtp/email"
+
+	payload := map[string]interface{}{
+		"sender": map[string]string{
+			"name":  "ERP System", // You might want to make this configurable too
+			"email": "no-reply@example.com",
+		},
+		"to": []map[string]string{
+			{
+				"email": mailTo,
+			},
+		},
+		"subject":     subject,
+		"htmlContent": body,
+	}
+
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("accept", "application/json")
+	req.Header.Set("api-key", apiKey)
+	req.Header.Set("content-type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 300 {
+		return c.Status(resp.StatusCode).JSON(fiber.Map{
+			"error":   "brevo_error",
+			"details": string(respBody),
+		})
+	}
+
+	var wfEngine = c.Locals("wfEngine").([]WorkflowEngine)
+	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: "Email Sent"})
+	c.Locals("wfEngine", wfEngine)
+
+	return c.Status(200).JSON(fiber.Map{
+		"status":  "success",
+		"message": "Email sent successfully",
+	})
+}
 
 func handleApi(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error {
 	var (
@@ -1307,6 +1408,8 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		err = handleSaveLog(c, workflowDetailResult, db, search)
 	case "search":
 		err = handleSearch(c, workflowDetailResult, db, search)
+	case "searchsingle":
+		err = handleSearchSingle(c, workflowDetailResult, db, search)
 	case "searchrow":
 		err = handleSearchRow(c, workflowDetailResult, db, search)
 	case "storeprocedure":
@@ -1326,8 +1429,8 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		err = handleWorkflow(c, workflowDetailResult, db, search)
 	case "api":
 		err = handleApi(c, workflowDetailResult, db)
-	/*case "brevoapi":
-	err = handleBrevo(c, workflowDetailResult, db)*/
+	case "brevoapi":
+		err = handleBrevo(c, workflowDetailResult, db)
 	case "End":
 		flowTerminated = true
 		return nil
