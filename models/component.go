@@ -6,6 +6,8 @@ type Component struct {
 	Componenttitle      string            `gorm:"column:componenttitle" json:"componenttitle"`
 	Componentcategoryid int               `gorm:"column:componentcategoryid" json:"componentcategoryid"`
 	Componentclass      string            `gorm:"column:componentclass" json:"componentclass"`
+	Version             string            `gorm:"column:version" json:"version"`
+	Createdby           string            `gorm:"column:createdby" json:"createdby"`
 	Input               int8              `gorm:"column:input" json:"input"`
 	Output              int8              `gorm:"column:output" json:"output"`
 	Componentcategory   Componentcategory `gorm:"foreignKey:componentcategoryid;references:componentcategoryid"`

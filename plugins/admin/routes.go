@@ -2,6 +2,8 @@
 package admin
 
 import (
+	dbgenerator "erp6-be-golang/core/generator/db"
+
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
@@ -38,6 +40,10 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Post("/generate-module", func(c *fiber.Ctx) error { return CreateModulesHandler(c, db) })
 		admin.Post("/execute-flow", func(c *fiber.Ctx) error { return ExecuteFlowHandler(c, db) })
 		admin.Post("/down-template", func(c *fiber.Ctx) error { return DownTemplateHandler(c, db) })
+		admin.Post("/execute-table-operation", func(c *fiber.Ctx) error { return ExecuteTableOperationHandler(c, db) })
+		admin.Post("/plugins/upload", func(c *fiber.Ctx) error {
+			return dbgenerator.HandlePluginUpload(c, db)
+		})
 	}
 
 	media := app.Group("/media")

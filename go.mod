@@ -14,6 +14,7 @@ require (
 	github.com/nicksnyder/go-i18n/v2 v2.6.0
 	github.com/redis/go-redis/v9 v9.14.1
 	github.com/syndtr/goleveldb v1.0.0
+	github.com/traefik/yaegi v0.16.1
 	github.com/xuri/excelize/v2 v2.10.0
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/postgres v1.6.0
