@@ -45,10 +45,7 @@ type Config struct {
 	ReportUser       string
 	ReportPass       string
 	ReportTime       string
-	SwaggerActive    string
-	StorageType      string
 	WriteBufferSize  string
-	Modules          []string
 }
 
 var ConfigApps *Config
@@ -96,8 +93,6 @@ func LoadConfig() {
 		ReportUser:       getEnv("REPORT_USER", ""),
 		ReportPass:       getEnv("REPORT_PASS", ""),
 		ReportTime:       getEnv("REPORT_TIME", ""),
-		SwaggerActive:    getEnv("SWAGGER_ACTIVE", ""),
-		StorageType:      getEnv("STORAGE_TYPE", ""),
 		WriteBufferSize:  getEnv("WRITE_BUFFER_SIZE", ""),
 	}
 
@@ -137,8 +132,6 @@ func LoadConfig() {
 	helpers.IsEmptyLog(ConfigApps.ReportUser, "REPORT_USER", true)
 	helpers.IsEmptyLog(ConfigApps.ReportPass, "REPORT_PASS", true)
 	helpers.IsEmptyLog(ConfigApps.ReportTime, "REPORT_TIME", true)
-	helpers.IsEmptyLog(ConfigApps.SwaggerActive, "SWAGGER_ACTIVE", true)
-	helpers.IsEmptyLog(ConfigApps.StorageType, "STORAGE_TYPE", false)
 	helpers.IsEmptyLog(ConfigApps.WriteBufferSize, "WRITE_BUFFER_SIZE", true)
 }
 

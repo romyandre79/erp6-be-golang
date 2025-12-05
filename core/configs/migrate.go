@@ -22,11 +22,11 @@ func RunMigrations(db *gorm.DB) error {
 	var sqlFile string
 	switch ConfigApps.DBDriver {
 	case "mysql", "mariadb":
-		sqlFile = "core/db/db-init-maria.sql"
+		sqlFile = "uploads/db-init-maria.sql"
 	case "postgres":
-		sqlFile = "core/db/db-init-postgres.sql"
+		sqlFile = "uploads/db-init-postgres.sql"
 	case "sqlserver":
-		sqlFile = "core/db/db-init-sqlserver.sql"
+		sqlFile = "uploads/db-init-sqlserver.sql"
 	default:
 		return fmt.Errorf("unsupported database driver: %s", ConfigApps.DBDriver)
 	}
