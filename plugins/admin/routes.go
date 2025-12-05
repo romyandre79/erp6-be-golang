@@ -21,8 +21,8 @@ type loginRequest struct {
 
 func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	// Initialize Hub
-	Hub = ws.NewHub()
-	go Hub.Run()
+	ws.GlobalHub = ws.NewHub()
+	go ws.GlobalHub.Run()
 
 	auth := app.Group("/auth")
 
@@ -58,20 +58,17 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Post("/notifications/send", func(c *fiber.Ctx) error { return SendNotification(c, db) })
 	}
 
-	// WebSocket Route - Specific middleware for WS upgrade might be needed if Headers are missing
-	// Just reusing AuthMiddleware for now assuming token is passed in Query param or Header
-	app.Use("/ws", func(c *fiber.Ctx) error {
-		if websocket.IsWebSocketUpgrade(c) {
-			c.Locals("allowed", true)
-			return c.Next()
-		}
-		return fiber.ErrUpgradeRequired
-	})
-
-	// Apply Auth Middleware to /ws?
-	// If AuthMiddleware reads Authorization header, Browser JS WebSocket cannot set it easily.
-	// We might need a query param adapter.
-	app.Get("/ws/notifications", AuthMiddleware, websocket.New(WebSocketHandler))
+	app.Get("/ws/notifications",
+		AuthMiddleware, // ✅ Auth first
+		func(c *fiber.Ctx) error { // ✅ Then check WS upgrade
+			if websocket.IsWebSocketUpgrade(c) {
+				c.Locals("allowed", true)
+				return c.Next()
+			}
+			return fiber.ErrUpgradeRequired
+		},
+		websocket.New(WebSocketHandler),
+	)
 
 	media := app.Group("/media")
 	media.Use(AuthMiddleware)

@@ -67,10 +67,13 @@ func (h *Hub) SendToUser(userID int, message []byte) {
 	if conns, ok := h.Clients[userID]; ok {
 		for _, conn := range conns {
 			// Need to handle error?
-			if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
-				// If write fails, we might want to unregister?
-				// For now simplest is just log or ignore, the loop will continue
-			}
+			// if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			// 	// If write fails, we might want to unregister?
+			// 	// For now simplest is just log or ignore, the loop will continue
+			// }
+			conn.WriteMessage(websocket.TextMessage, message)
 		}
 	}
 }
+
+var GlobalHub *Hub
