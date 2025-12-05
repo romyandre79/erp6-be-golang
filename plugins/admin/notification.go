@@ -12,12 +12,21 @@ import (
 	"gorm.io/gorm"
 )
 
-var Hub *ws.Hub
-
 // WebSocketHandler handles the websocket connection
 func WebSocketHandler(c *websocket.Conn) {
+	log.Println("WebSocketHandler: Started")
 	// useraccessid is set in locals by middleware
-	useraccessid := c.Locals("userid").(int)
+
+	useridVal := c.Locals("userid")
+	log.Printf("WebSocketHandler: Locals(userid) = %v\n", useridVal)
+
+	if useridVal == nil {
+		log.Println("WebSocketHandler: userid is nil - closing connection")
+		c.Close()
+		return
+	}
+
+	useraccessid := useridVal.(int)
 
 	log.Printf("User %d connected\n", useraccessid)
 
@@ -26,10 +35,10 @@ func WebSocketHandler(c *websocket.Conn) {
 		Conn:   c,
 	}
 
-	Hub.Register <- info
+	ws.GlobalHub.Register <- info
 
 	defer func() {
-		Hub.Unregister <- info
+		ws.GlobalHub.Unregister <- info
 		c.Close()
 	}()
 
@@ -105,7 +114,7 @@ func SendNotification(c *fiber.Ctx, db *gorm.DB) error {
 		"data": todo,
 	})
 
-	Hub.SendToUser(req.ReceiverID, payload)
+	ws.GlobalHub.SendToUser(req.ReceiverID, payload)
 
 	return c.JSON(fiber.Map{"status": "success", "data": todo})
 }
