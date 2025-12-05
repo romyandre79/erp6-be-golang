@@ -3,14 +3,15 @@ package main
 import (
 	"erp6-be-golang/core/cache"
 	"erp6-be-golang/core/configs"
-	"erp6-be-golang/core/email"
+
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/core/i18n"
 	"erp6-be-golang/core/logger"
 	"erp6-be-golang/core/plugin"
-	"erp6-be-golang/core/storage"
 	"log"
 	"strconv"
+
+	_ "erp6-be-golang/plugins/admin"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -38,27 +39,27 @@ func main() {
 	}
 
 	// Load DB from .env
+	// Ensure database exists (create if not)
+	if err := configs.EnsureDatabaseExists(); err != nil {
+		helpers.IsError(err, "Ensure Database Exists", true)
+	}
+
 	db, err := configs.InitDatabase()
 
 	if err != nil {
 		helpers.IsError(err, "Check DB Server", true)
 	}
 
+	// Run database migrations if enabled
+	err = configs.RunMigrations(db)
+	if err != nil {
+		helpers.IsError(err, "Database Migration", true)
+	}
+
 	// Load Cache from .env
 	_, err = cache.NewCache()
 	if err != nil {
 		helpers.IsError(err, "Cache Server", true)
-	}
-
-	// Load Storage form .env
-	_, error := storage.Get()
-	if error {
-		helpers.IsError(err, "Storage Server", true)
-	}
-
-	_, err = email.NewEmailSender()
-	if err != nil {
-		helpers.IsError(err, "Email Server", true)
 	}
 
 	log.Print("End Configuration ... ")

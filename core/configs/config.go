@@ -24,6 +24,8 @@ type Config struct {
 	DBName           string
 	DBIdleConn       string
 	DBMaxConn        string
+	DBAutoMigrate    string
+	DBSeed           string
 	DateToDb         string
 	DateFromDb       string
 	DisableKeepAlive string
@@ -72,6 +74,8 @@ func LoadConfig() {
 		DBName:           getEnv("DB_NAME", ""),
 		DBIdleConn:       getEnv("DB_IDLE_CONN", ""),
 		DBMaxConn:        getEnv("DB_MAX_CONN", ""),
+		DBAutoMigrate:    getEnv("DB_AUTO_MIGRATE", "false"),
+		DBSeed:           getEnv("DB_SEED", "false"),
 		DateToDb:         getEnv("DATE_TO_DB", ""),
 		DateFromDb:       getEnv("DATE_FROM_DB", ""),
 		DisableKeepAlive: getEnv("DISABLE_KEEP_ALIVE", ""),

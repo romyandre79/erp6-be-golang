@@ -1,0 +1,289 @@
+package generator
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+)
+
+// TableDefinition represents the table structure from JSON
+type TableDefinition struct {
+	Table struct {
+		ID          int           `json:"id"`
+		DBID        string        `json:"dbid"`
+		Name        string        `json:"name"`
+		X           int           `json:"x"`
+		Y           int           `json:"y"`
+		Width       int           `json:"width"`
+		Columns     []TableColumn `json:"columns"`
+		IsPublished bool          `json:"ispublished"`
+		Comment     string        `json:"comment"`
+	} `json:"table"`
+	Relations []interface{} `json:"relations"`
+	Areas     []interface{} `json:"areas"`
+}
+
+// TableColumn represents a table column from the designer
+type TableColumn struct {
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	AllowNull string `json:"allownull"`
+	Default   string `json:"default"`
+}
+
+// ExecutionResult represents the result of SQL execution
+type ExecutionResult struct {
+	Success       bool    `json:"success"`
+	GeneratedSQL  string  `json:"generated_sql"`
+	Message       string  `json:"message"`
+	ExecutionTime float64 `json:"execution_time_ms"`
+	Error         string  `json:"error,omitempty"`
+}
+
+// ParseTableJSON parses the table JSON from request body
+func ParseTableJSON(jsonData string) (*TableDefinition, error) {
+	var tableDef TableDefinition
+	err := json.Unmarshal([]byte(jsonData), &tableDef)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse table JSON: %v", err)
+	}
+
+	// Validate required fields
+	if tableDef.Table.Name == "" {
+		return nil, fmt.Errorf("table name is required")
+	}
+	if len(tableDef.Table.Columns) == 0 {
+		return nil, fmt.Errorf("table must have at least one column")
+	}
+
+	return &tableDef, nil
+}
+
+// GetDatabaseDriver detects the database driver from GORM connection
+func GetDatabaseDriver(db *gorm.DB) string {
+	dialector := db.Dialector.Name()
+	return dialector
+}
+
+// MapColumnType maps designer column types to SQL types based on database driver
+func MapColumnType(colType string, driver string) string {
+	colType = strings.ToLower(colType)
+
+	switch colType {
+	case "auto":
+		switch driver {
+		case "postgres":
+			return "SERIAL PRIMARY KEY"
+		case "sqlserver":
+			return "INT IDENTITY(1,1) PRIMARY KEY"
+		default: // mysql, mariadb
+			return "INT AUTO_INCREMENT PRIMARY KEY"
+		}
+	case "text":
+		return "VARCHAR(255)"
+	case "longtext":
+		return "TEXT"
+	case "number", "integer", "int":
+		return "INT"
+	case "decimal", "float":
+		return "DECIMAL(10,2)"
+	case "boolean", "bool":
+		switch driver {
+		case "mysql", "mariadb":
+			return "TINYINT(1)"
+		default:
+			return "BOOLEAN"
+		}
+	case "date":
+		return "DATE"
+	case "datetime":
+		switch driver {
+		case "postgres":
+			return "TIMESTAMP"
+		default:
+			return "DATETIME"
+		}
+	case "timestamp":
+		switch driver {
+		case "postgres":
+			return "TIMESTAMP"
+		default:
+			return "TIMESTAMP"
+		}
+	case "time":
+		return "TIME"
+	default:
+		return "VARCHAR(255)"
+	}
+}
+
+// GenerateCreateTableSQL generates CREATE TABLE statement from table definition
+func GenerateCreateTableSQL(db *gorm.DB, table *TableDefinition) (string, error) {
+	driver := GetDatabaseDriver(db)
+	tableName := table.Table.Name
+
+	var columns []string
+
+	for _, col := range table.Table.Columns {
+		colDef := fmt.Sprintf("`%s` %s", col.Name, MapColumnType(col.Type, driver))
+
+		// Check if this column is a primary key (auto type)
+		if strings.ToLower(col.Type) != "auto" {
+			// Add NOT NULL constraint
+			if col.AllowNull == "false" || col.AllowNull == "" {
+				colDef += " NOT NULL"
+			}
+
+			// Add DEFAULT value
+			if col.Default != "" {
+				if col.Default == "CURRENT_TIMESTAMP" {
+					colDef += " DEFAULT CURRENT_TIMESTAMP"
+				} else {
+					colDef += fmt.Sprintf(" DEFAULT '%s'", col.Default)
+				}
+			}
+		}
+
+		columns = append(columns, colDef)
+	}
+
+	// For PostgreSQL, use double quotes instead of backticks
+	if driver == "postgres" {
+		sql := fmt.Sprintf("CREATE TABLE \"%s\" (\n  %s\n)", tableName, strings.Join(columns, ",\n  "))
+		sql = strings.ReplaceAll(sql, "`", "\"")
+		return sql, nil
+	}
+
+	// For SQL Server, use square brackets
+	if driver == "sqlserver" {
+		sql := fmt.Sprintf("CREATE TABLE [%s] (\n  %s\n)", tableName, strings.Join(columns, ",\n  "))
+		sql = strings.ReplaceAll(sql, "`", "")
+		return sql, nil
+	}
+
+	// For MySQL/MariaDB
+	sql := fmt.Sprintf("CREATE TABLE `%s` (\n  %s\n)", tableName, strings.Join(columns, ",\n  "))
+	return sql, nil
+}
+
+// GenerateAlterTableSQL generates ALTER TABLE statements by comparing with existing structure
+func GenerateAlterTableSQL(db *gorm.DB, tableName string, newColumns []TableColumn) ([]string, error) {
+	driver := GetDatabaseDriver(db)
+	var alterStatements []string
+
+	// Get existing columns from database
+	type ColumnInfo struct {
+		ColumnName string
+		DataType   string
+	}
+
+	var existingCols []ColumnInfo
+	var query string
+
+	switch driver {
+	case "postgres":
+		query = fmt.Sprintf(`
+			SELECT column_name, data_type 
+			FROM information_schema.columns 
+			WHERE table_name = '%s'
+		`, tableName)
+	case "sqlserver":
+		query = fmt.Sprintf(`
+			SELECT COLUMN_NAME as column_name, DATA_TYPE as data_type
+			FROM INFORMATION_SCHEMA.COLUMNS 
+			WHERE TABLE_NAME = '%s'
+		`, tableName)
+	default: // mysql, mariadb
+		query = fmt.Sprintf(`
+			SELECT COLUMN_NAME as column_name, DATA_TYPE as data_type
+			FROM INFORMATION_SCHEMA.COLUMNS 
+			WHERE TABLE_NAME = '%s' AND TABLE_SCHEMA = DATABASE()
+		`, tableName)
+	}
+
+	err := db.Raw(query).Scan(&existingCols).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to query existing columns: %v", err)
+	}
+
+	// Create map of existing columns
+	existingMap := make(map[string]bool)
+	for _, col := range existingCols {
+		existingMap[strings.ToLower(col.ColumnName)] = true
+	}
+
+	// Find new columns to add
+	for _, col := range newColumns {
+		colNameLower := strings.ToLower(col.Name)
+		if !existingMap[colNameLower] {
+			// This is a new column, generate ADD COLUMN statement
+			colDef := MapColumnType(col.Type, driver)
+
+			var alterSQL string
+			if driver == "postgres" {
+				alterSQL = fmt.Sprintf("ALTER TABLE \"%s\" ADD COLUMN \"%s\" %s", tableName, col.Name, colDef)
+			} else if driver == "sqlserver" {
+				alterSQL = fmt.Sprintf("ALTER TABLE [%s] ADD [%s] %s", tableName, col.Name, colDef)
+			} else {
+				alterSQL = fmt.Sprintf("ALTER TABLE `%s` ADD COLUMN `%s` %s", tableName, col.Name, colDef)
+			}
+
+			// Add constraints
+			if col.AllowNull == "false" && strings.ToLower(col.Type) != "auto" {
+				if driver == "postgres" || driver == "sqlserver" {
+					alterSQL += " NOT NULL"
+				} else {
+					alterSQL += " NOT NULL"
+				}
+			}
+
+			if col.Default != "" && col.Default != "CURRENT_TIMESTAMP" {
+				alterSQL += fmt.Sprintf(" DEFAULT '%s'", col.Default)
+			}
+
+			alterStatements = append(alterStatements, alterSQL)
+		}
+	}
+
+	return alterStatements, nil
+}
+
+// GenerateDropTableSQL generates DROP TABLE statement
+func GenerateDropTableSQL(tableName string, driver string) string {
+	if driver == "postgres" {
+		return fmt.Sprintf("DROP TABLE IF EXISTS \"%s\"", tableName)
+	} else if driver == "sqlserver" {
+		return fmt.Sprintf("DROP TABLE IF EXISTS [%s]", tableName)
+	}
+	return fmt.Sprintf("DROP TABLE IF EXISTS `%s`", tableName)
+}
+
+// ExecuteDDLStatement executes DDL statement within a transaction
+func ExecuteDDLStatement(db *gorm.DB, sql string) (*ExecutionResult, error) {
+	startTime := time.Now()
+	result := &ExecutionResult{
+		GeneratedSQL: sql,
+	}
+
+	// Execute within transaction for safety
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return tx.Exec(sql).Error
+	})
+
+	executionTime := time.Since(startTime).Milliseconds()
+	result.ExecutionTime = float64(executionTime)
+
+	if err != nil {
+		result.Success = false
+		result.Error = err.Error()
+		result.Message = "Failed to execute SQL"
+		return result, err
+	}
+
+	result.Success = true
+	result.Message = "SQL executed successfully"
+	return result, nil
+}
