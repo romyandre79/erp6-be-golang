@@ -4,6 +4,9 @@ package admin
 import (
 	dbgenerator "erp6-be-golang/core/generator/db"
 
+	"erp6-be-golang/core/ws"
+
+	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
@@ -17,6 +20,10 @@ type loginRequest struct {
 }
 
 func RegisterRoutes(app *fiber.App, db *gorm.DB) {
+	// Initialize Hub
+	Hub = ws.NewHub()
+	go Hub.Run()
+
 	auth := app.Group("/auth")
 
 	// Public routes
@@ -44,7 +51,27 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Post("/plugins/upload", func(c *fiber.Ctx) error {
 			return dbgenerator.HandlePluginUpload(c, db)
 		})
+
+		// Notification Routes
+		admin.Get("/notifications/unread", func(c *fiber.Ctx) error { return GetUnreadNotifications(c, db) })
+		admin.Post("/notifications/:id/read", func(c *fiber.Ctx) error { return MarkAsRead(c, db) })
+		admin.Post("/notifications/send", func(c *fiber.Ctx) error { return SendNotification(c, db) })
 	}
+
+	// WebSocket Route - Specific middleware for WS upgrade might be needed if Headers are missing
+	// Just reusing AuthMiddleware for now assuming token is passed in Query param or Header
+	app.Use("/ws", func(c *fiber.Ctx) error {
+		if websocket.IsWebSocketUpgrade(c) {
+			c.Locals("allowed", true)
+			return c.Next()
+		}
+		return fiber.ErrUpgradeRequired
+	})
+
+	// Apply Auth Middleware to /ws?
+	// If AuthMiddleware reads Authorization header, Browser JS WebSocket cannot set it easily.
+	// We might need a query param adapter.
+	app.Get("/ws/notifications", AuthMiddleware, websocket.New(WebSocketHandler))
 
 	media := app.Group("/media")
 	media.Use(AuthMiddleware)
