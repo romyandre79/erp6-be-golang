@@ -43,7 +43,7 @@ func IsNotListLog(varCheck string, dataMaster []string, varText string, isRequir
 func IsError(err error, varText string, isRequired bool) {
 	if err != nil {
 		if isRequired {
-			log.Fatalf("%s are Required %s", varText, ICON_CANCEL_RED)
+			log.Fatalf("%s are Required %s, error %v", varText, ICON_CANCEL_RED, err)
 		} else {
 			log.Printf(varText+" %s", ICON_CANCEL)
 		}
