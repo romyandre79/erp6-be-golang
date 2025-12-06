@@ -311,7 +311,19 @@ func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.D
 			sqlState += " order by " + sp.Sort + " " + sp.Order
 		}
 		if sp.Paging && !isSingle && !isRow {
-			sqlState += " limit " + strconv.Itoa(sp.Offset) + ", " + strconv.Itoa(sp.Rows)
+			driver := GetDatabaseDriver(db)
+			switch driver {
+			case "sqlserver", "oracle":
+				// SQL Server and Oracle 12c+ support OFFSET/FETCH
+				if sp.Sort == "" {
+					sqlState += " order by (SELECT NULL)"
+				}
+				sqlState += fmt.Sprintf(" OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", sp.Offset, sp.Rows)
+			default:
+				// Work for MySQL, PostgreSQL, SQLite
+				// LIMIT rows OFFSET offset
+				sqlState += fmt.Sprintf(" LIMIT %d OFFSET %d", sp.Rows, sp.Offset)
+			}
 		}
 
 		if sp.Enable {
