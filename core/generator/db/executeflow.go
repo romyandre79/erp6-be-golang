@@ -30,10 +30,14 @@ type WorkflowDetailResult struct {
 }
 
 type WorkflowEngine struct {
-	WorkflowId    int
-	NodeId        int
-	DataInputNode string
-	ResultNode    any
+	WorkflowId    int     `json:"workflowId"`
+	NodeId        int     `json:"nodeId"`
+	ComponentName string  `json:"componentName"`
+	DataInputNode any     `json:"input"`
+	ResultNode    any     `json:"result"`
+	Success       bool    `json:"success"`
+	ExecutionTime float64 `json:"executionTime"`
+	Error         string  `json:"error,omitempty"`
 }
 
 type Connection struct {
@@ -239,9 +243,22 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 	component.IsRun = true
 	fmt.Printf("Running workflowid: %d component: %s (ID: %d)\n", workflowId, component.Name, component.ID)
 
+	// Start timing
+	startTime := time.Now()
+
 	workflowDetailResult, err := GetWorkflowDetail(db, component.Name, workflowId, nodeId)
 	if err != nil {
+		// Record failed step
+		appendStepResult(c, workflowId, nodeId, component.Name, nil, nil, false, 0, err.Error())
 		return err
+	}
+
+	// Prepare input params for tracking
+	inputParams := make(map[string]string)
+	for _, p := range workflowDetailResult {
+		if p.CompValue != "" {
+			inputParams[p.InputName] = p.CompValue
+		}
 	}
 
 	// Create context for the component
@@ -262,16 +279,50 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 	if strings.EqualFold(component.Name, "End") {
 		flowTerminated = true
 		c.Locals("flowTerminated", true)
+		execTime := float64(time.Since(startTime).Milliseconds())
+		appendStepResult(c, workflowId, nodeId, component.Name, inputParams, "Flow ended", true, execTime, "")
 		return nil
 	}
 
 	handler, exists := GetComponent(component.Name)
 	if exists {
 		if err := handler.Execute(ctx); err != nil {
+			execTime := float64(time.Since(startTime).Milliseconds())
+			appendStepResult(c, workflowId, nodeId, component.Name, inputParams, nil, false, execTime, err.Error())
 			return err
 		}
 	} else {
+		execTime := float64(time.Since(startTime).Milliseconds())
+		appendStepResult(c, workflowId, nodeId, component.Name, inputParams, nil, false, execTime, fmt.Sprintf("unknown component: %s", component.Name))
 		return fmt.Errorf("unknown component: %s", component.Name)
+	}
+
+	// Record execution time and get the last result from wfEngine
+	execTime := float64(time.Since(startTime).Milliseconds())
+
+	// Get any result that might have been set by the component
+	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+	var stepResult any = "OK"
+	if len(wfEngine) > 0 {
+		lastResult := wfEngine[len(wfEngine)-1]
+		if lastResult.ResultNode != nil {
+			stepResult = lastResult.ResultNode
+		}
+	}
+
+	// Update the last step with component info if it was just added, or add new one
+	if len(wfEngine) > 0 && wfEngine[len(wfEngine)-1].ComponentName == "" {
+		// Component already appended result, update with metadata
+		wfEngine[len(wfEngine)-1].WorkflowId = workflowId
+		wfEngine[len(wfEngine)-1].NodeId = nodeId
+		wfEngine[len(wfEngine)-1].ComponentName = component.Name
+		wfEngine[len(wfEngine)-1].DataInputNode = inputParams
+		wfEngine[len(wfEngine)-1].Success = true
+		wfEngine[len(wfEngine)-1].ExecutionTime = execTime
+		c.Locals("wfEngine", wfEngine)
+	} else {
+		// Component didn't append, add our own tracking
+		appendStepResult(c, workflowId, nodeId, component.Name, inputParams, stepResult, true, execTime, "")
 	}
 
 	// Handle Decision flow
@@ -310,6 +361,22 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 	}
 
 	return nil
+}
+
+// appendStepResult adds a step result to the workflow engine
+func appendStepResult(c *fiber.Ctx, workflowId int, nodeId int, componentName string, input any, result any, success bool, execTime float64, errMsg string) {
+	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+	wfEngine = append(wfEngine, WorkflowEngine{
+		WorkflowId:    workflowId,
+		NodeId:        nodeId,
+		ComponentName: componentName,
+		DataInputNode: input,
+		ResultNode:    result,
+		Success:       success,
+		ExecutionTime: execTime,
+		Error:         errMsg,
+	})
+	c.Locals("wfEngine", wfEngine)
 }
 
 func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error {
