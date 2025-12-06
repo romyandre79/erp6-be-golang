@@ -2,6 +2,11 @@
 package admin
 
 import (
+	dbgenerator "erp6-be-golang/core/generator/db"
+
+	"erp6-be-golang/core/ws"
+
+	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
 )
@@ -15,6 +20,13 @@ type loginRequest struct {
 }
 
 func RegisterRoutes(app *fiber.App, db *gorm.DB) {
+	// Initialize Hub
+	ws.GlobalHub = ws.NewHub()
+	go ws.GlobalHub.Run()
+
+	// Set GlobalDB for WebSocket handlers
+	GlobalDB = db
+
 	auth := app.Group("/auth")
 
 	// Public routes
@@ -38,7 +50,33 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Post("/generate-module", func(c *fiber.Ctx) error { return CreateModulesHandler(c, db) })
 		admin.Post("/execute-flow", func(c *fiber.Ctx) error { return ExecuteFlowHandler(c, db) })
 		admin.Post("/down-template", func(c *fiber.Ctx) error { return DownTemplateHandler(c, db) })
+		admin.Post("/execute-table-operation", func(c *fiber.Ctx) error { return ExecuteTableOperationHandler(c, db) })
+		admin.Post("/ai/command", func(c *fiber.Ctx) error { return AiCommandHandler(c, db) })
+		admin.Post("/plugins/upload", func(c *fiber.Ctx) error {
+			return dbgenerator.HandlePluginUpload(c, db)
+		})
+
+		// Notification Routes
+		admin.Get("/notifications/unread", func(c *fiber.Ctx) error { return GetUnreadNotifications(c, db) })
+		admin.Post("/notifications/:id/read", func(c *fiber.Ctx) error { return MarkAsRead(c, db) })
+		admin.Post("/notifications/send", func(c *fiber.Ctx) error { return SendNotification(c, db) })
+
+		// Chat Routes
+		admin.Get("/users/list", func(c *fiber.Ctx) error { return GetUserListHandler(c, db) })
+		admin.Get("/chat/history", func(c *fiber.Ctx) error { return GetChatHistoryHandler(c, db) })
 	}
+
+	app.Get("/ws/notifications",
+		AuthMiddleware, // ✅ Auth first
+		func(c *fiber.Ctx) error { // ✅ Then check WS upgrade
+			if websocket.IsWebSocketUpgrade(c) {
+				c.Locals("allowed", true)
+				return c.Next()
+			}
+			return fiber.ErrUpgradeRequired
+		},
+		websocket.New(WebSocketHandler),
+	)
 
 	media := app.Group("/media")
 	media.Use(AuthMiddleware)

@@ -1,28 +1,15 @@
 package generator
 
 import (
-	"bytes"
 	"encoding/json"
-	"erp6-be-golang/core/configs"
-	"erp6-be-golang/core/email"
-	"erp6-be-golang/core/helpers"
-	"erp6-be-golang/core/i18n"
 	"erp6-be-golang/models"
 	"errors"
 	"fmt"
-	"io"
-	"log"
-	"mime/multipart"
-	"net/http"
-	"net/url"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
 )
 
@@ -43,10 +30,14 @@ type WorkflowDetailResult struct {
 }
 
 type WorkflowEngine struct {
-	WorkflowId    int
-	NodeId        int
-	DataInputNode string
-	ResultNode    any
+	WorkflowId    int     `json:"workflowId"`
+	NodeId        int     `json:"nodeId"`
+	ComponentName string  `json:"componentName"`
+	DataInputNode any     `json:"input"`
+	ResultNode    any     `json:"result"`
+	Success       bool    `json:"success"`
+	ExecutionTime float64 `json:"executionTime"`
+	Error         string  `json:"error,omitempty"`
 }
 
 type Connection struct {
@@ -134,44 +125,6 @@ func handleStart(c *fiber.Ctx) error {
 	return nil
 }
 
-func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult) error {
-	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
-	var msg string
-	enable := true
-
-	for _, p := range params {
-		switch p.InputName {
-		case "msgbox":
-			msg = strings.TrimSpace(p.CompValue)
-		case "enablemsg":
-			if strings.EqualFold(p.CompValue, "false") {
-				enable = false
-			}
-		}
-	}
-
-	if enable {
-		helpers.SuccessResponse(c, "FLOW", msg)
-	}
-	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: msg})
-	c.Locals("wfEngine", wfEngine)
-	return nil
-}
-
-func handleSaveLog(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
-	logMessage := ""
-	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
-	for _, p := range params {
-		if p.InputName == "logmessage" {
-			logMessage = p.CompValue
-		}
-	}
-	// TODO using log handler
-	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: logMessage})
-	c.Locals("wfEngine", wfEngine)
-	return nil
-}
-
 func GetSearchText(c *fiber.Ctx, paramTypes []string, param, defVal, dataType string) string {
 	s := defVal
 
@@ -186,7 +139,6 @@ func GetSearchText(c *fiber.Ctx, paramTypes []string, param, defVal, dataType st
 				s = val
 			}
 		case "Q":
-			// Prioritas: GET['q'] > POST['q']
 			var val string
 			if val = c.Query("q"); val != "" {
 				s = val
@@ -196,11 +148,10 @@ func GetSearchText(c *fiber.Ctx, paramTypes []string, param, defVal, dataType st
 			fmt.Printf("%s", val)
 		}
 
-		// Format tanggal, datetime, time
+		// Format date, datetime, time
 		if strings.Contains(strings.ToLower(param), "date") && !strings.Contains(strings.ToLower(param), "datetime") {
 			if s != "" {
-				// ganti "2006-01-02" dengan format ke DB sesuai kebutuhanmu
-				t, err := time.Parse("02-01-2006", s) // contoh input: 31-12-2025
+				t, err := time.Parse("02-01-2006", s)
 				if err == nil {
 					s = t.Format("2006-01-02")
 				}
@@ -222,7 +173,7 @@ func GetSearchText(c *fiber.Ctx, paramTypes []string, param, defVal, dataType st
 		}
 	}
 
-	// jika tipe data string → ubah ke LIKE pattern: %kata%
+	// If datatype is string → convert to LIKE pattern: %word%
 	if strings.ToLower(dataType) == "string" {
 		s = "%" + strings.ReplaceAll(strings.TrimSpace(s), " ", "%") + "%"
 	}
@@ -268,1114 +219,13 @@ func getDataByCompany(db *gorm.DB, username string, dataType string) (string, er
 	return cid, nil
 }
 
-// Helper struct to hold parsed search parameters
-type SearchParams struct {
-	Sort     string
-	From     string
-	Order    string
-	Select   string
-	LeftJoin string
-	Where    string
-	GroupBy  string
-	Enable   bool
-	Paging   bool
-	Page     int
-	Rows     int
-	Offset   int
-}
-
-func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr string, userId interface{}) string {
-	whereStat := ""
-	wheres := strings.Fields(compValue)
-	for _, data := range wheres {
-		dataLower := strings.ToLower(data)
-		if dataLower != "and" && dataLower != "or" {
-			// Cek apakah ada '@' → berarti fungsi dinamis
-			if strings.Contains(data, "@") {
-				funcs := strings.Split(data, "@")
-				field := strings.ReplaceAll(funcs[0], "@", "")
-				field = strings.ReplaceAll(field, "=", "")
-
-				switch strings.ToLower(funcs[1]) {
-				case "getemployeebycompany":
-					listByCompany, _ := getDataByCompany(db, userNameStr, "isemployee")
-					whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
-				case "getcustomerbycompany":
-					listByCompany, _ := getDataByCompany(db, userNameStr, "iscustomer")
-					whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
-				case "getvendorbycompany":
-					listByCompany, _ := getDataByCompany(db, userNameStr, "isvendor")
-					whereStat += fmt.Sprintf("%s in (%s)", field, listByCompany)
-				case "getuserrecord":
-					// getuserobject atau getuserrecord
-					object := strings.Split(funcs[1], ">")
-					userObject, _ := getUserObjectValues(db, userNameStr, object[1])
-					whereStat += fmt.Sprintf("%s in (%s)", field, userObject)
-				case "userid":
-					whereStat += fmt.Sprintf("%s = %v", field, userId)
-				}
-			} else if strings.Contains(data, "=") {
-				datas := strings.SplitN(data, "=", 2)
-				left := datas[0]
-				right := datas[1]
-
-				if strings.HasPrefix(strings.ToLower(right), "between:") {
-					// Format: field=between:start:end
-					parts := strings.Split(right, ":")
-					if len(parts) == 3 {
-						start := parts[1]
-						end := parts[2]
-
-						// Check if values are dynamic (from query/form)
-						if strings.HasPrefix(start, "$") {
-							key := start[1:]
-							val := c.Query(key)
-							if val == "" {
-								val = c.FormValue(key)
-							}
-							start = val
-						}
-						if strings.HasPrefix(end, "$") {
-							key := end[1:]
-							val := c.Query(key)
-							if val == "" {
-								val = c.FormValue(key)
-							}
-							end = val
-						}
-
-						whereStat += fmt.Sprintf("(%s BETWEEN '%s' AND '%s') ", left, start, end)
-					}
-				} else if strings.Contains(right, ":") {
-					key := strings.ReplaceAll(right, ":", "")
-					val := c.Query(key)
-					if val == "" {
-						val = c.FormValue(key)
-					}
-					whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, val)
-				} else {
-					if strings.Contains(data, "empty") {
-						whereStat += fmt.Sprintf("%s is null", left)
-					} else if strings.Contains(data, "exist") {
-						whereStat += fmt.Sprintf("exist (%s)", left)
-					} else {
-						whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)
-					}
-				}
-			} else {
-				// Default → LIKE
-				if strings.Contains(data, ".") {
-					funcs := strings.Split(data, ".")
-					whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, GetSearchText(c, []string{"POST"}, funcs[1], "", "string"))
-				} else {
-					whereStat += " " + data + " "
-				}
-			}
-		} else {
-			// and / or
-			whereStat += " " + data + " "
-		}
-	}
-	return whereStat
-}
-
-func parseSelectClause(selectStr string) string {
-	parts := strings.Split(selectStr, ",")
-	var newParts []string
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if strings.Contains(part, ":") {
-			subParts := strings.Split(part, ":")
-			if len(subParts) == 2 {
-				field := subParts[0]
-				op := strings.ToLower(subParts[1])
-				switch op {
-				case "count":
-					// Use COUNT(*) or COUNT(1) for special fields, otherwise COUNT(field)
-					if field == "*" || field == "1" {
-						newParts = append(newParts, fmt.Sprintf("COUNT(%s)", field))
-					} else {
-						newParts = append(newParts, fmt.Sprintf("COUNT(%s)", field))
-					}
-				case "sum":
-					newParts = append(newParts, fmt.Sprintf("SUM(%s)", field))
-				case "avg":
-					newParts = append(newParts, fmt.Sprintf("AVG(%s)", field))
-				case "min":
-					newParts = append(newParts, fmt.Sprintf("MIN(%s)", field))
-				case "max":
-					newParts = append(newParts, fmt.Sprintf("MAX(%s)", field))
-				default:
-					newParts = append(newParts, part)
-				}
-			} else if len(subParts) == 3 {
-				// field:op:alias
-				field := subParts[0]
-				op := strings.ToLower(subParts[1])
-				alias := subParts[2]
-				switch op {
-				case "count":
-					// Use COUNT(*) or COUNT(1) for special fields, otherwise COUNT(field)
-					if field == "*" || field == "1" {
-						newParts = append(newParts, fmt.Sprintf("COUNT(%s) as %s", field, alias))
-					} else {
-						newParts = append(newParts, fmt.Sprintf("COUNT(%s) as %s", field, alias))
-					}
-				case "sum":
-					newParts = append(newParts, fmt.Sprintf("SUM(%s) as %s", field, alias))
-				case "avg":
-					newParts = append(newParts, fmt.Sprintf("AVG(%s) as %s", field, alias))
-				case "min":
-					newParts = append(newParts, fmt.Sprintf("MIN(%s) as %s", field, alias))
-				case "max":
-					newParts = append(newParts, fmt.Sprintf("MAX(%s) as %s", field, alias))
-				default:
-					newParts = append(newParts, part)
-				}
-			} else {
-				newParts = append(newParts, part)
-			}
-		} else {
-			newParts = append(newParts, part)
-		}
-	}
-	return strings.Join(newParts, ", ")
-}
-
-func parseSearchParams(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, suffix string) SearchParams {
-	sp := SearchParams{
-		Enable: true,
-		Page:   1,
-		Rows:   10,
-	}
-	userId := c.Locals("userid")
-	userName := c.Locals("username")
-	userNameStr, _ := userName.(string)
-
-	for _, p := range params {
-		name := strings.ToLower(p.InputName)
-		val := strings.TrimSpace(p.CompValue)
-
-		if name == "where"+suffix {
-			sp.Where = parseWhereClause(c, db, val, userNameStr, userId)
-		} else if name == "paging" && suffix == "" { // Paging usually only for main search
-			if val == "true" {
-				sp.Page, _ = strconv.Atoi(GetSearchText(c, []string{"POST", "GET"}, "page", "1", "int"))
-				sp.Rows, _ = strconv.Atoi(GetSearchText(c, []string{"POST", "GET"}, "rows", "10", "int"))
-				sp.Offset = (sp.Page - 1) * sp.Rows
-				if sp.Offset < 0 {
-					sp.Offset = 0
-				}
-				sp.Paging = true
-			}
-		} else if name == "sort"+suffix {
-			sp.Sort = val
-		} else if name == "from"+suffix {
-			sp.From = val
-		} else if name == "leftjoin"+suffix {
-			sp.LeftJoin = val
-		} else if name == "select"+suffix {
-			sp.Select = parseSelectClause(val)
-		} else if name == "groupby"+suffix {
-			sp.GroupBy = val
-		} else if name == "enable"+suffix { // e.g. enablesearch, enablerow
-			if val == "false" {
-				sp.Enable = false
-			}
-		} else if name == "into"+suffix { // for searchsingle
-			// handled in caller or generic function return
-		}
-	}
-	return sp
-}
-
-func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, suffix string, isSingle bool, isRow bool) error {
-	sp := parseSearchParams(c, params, db, suffix)
-	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
-	resultStat := make(map[string]interface{})
-
-	if sp.From == "" {
-		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA RETRIEVED", "EMPTY_QUERY")
-		return nil
-	}
-
-	// Count query for paging
-	if sp.Paging && !isSingle && !isRow {
-		var sqlStat string
-
-		// When GROUP BY is used, we need to count the number of groups
-		if sp.GroupBy != "" {
-			// Wrap in subquery to count the groups
-			innerQuery := "select 1 from " + sp.From
-			if sp.LeftJoin != "" {
-				lefts := strings.SplitSeq(sp.LeftJoin, ",")
-				for v := range lefts {
-					innerQuery += " left join " + v
-				}
-			}
-			if sp.Where != "" {
-				innerQuery += " where " + sp.Where
-			}
-			innerQuery += " group by " + sp.GroupBy
-			sqlStat = fmt.Sprintf("select count(1) as total from (%s) as grouped_results", innerQuery)
-		} else {
-			sqlStat = "select count(1) as total from " + sp.From
-			if sp.LeftJoin != "" {
-				lefts := strings.SplitSeq(sp.LeftJoin, ",")
-				for v := range lefts {
-					sqlStat += " left join " + v
-				}
-			}
-			if sp.Where != "" {
-				sqlStat += " where " + sp.Where
-			}
-		}
-
-		if sp.Enable {
-			var total map[string]interface{}
-			if err := db.Raw(sqlStat).Scan(&total).Error; err != nil {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
-				return nil
-			}
-			resultStat = total
-		} else {
-			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", sqlStat)
-			return nil
-		}
-	}
-
-	if sp.Select != "" {
-		sqlState := "select " + sp.Select + " from " + sp.From
-		if sp.LeftJoin != "" {
-			lefts := strings.SplitSeq(sp.LeftJoin, ",")
-			for v := range lefts {
-				sqlState += " left join " + v
-			}
-		}
-		if sp.Where != "" {
-			sqlState += " where " + sp.Where
-		}
-		if sp.GroupBy != "" {
-			sqlState += " group by " + sp.GroupBy
-		}
-		if sp.Sort != "" {
-			sqlState += " order by " + sp.Sort + " " + sp.Order
-		}
-		if sp.Paging && !isSingle && !isRow {
-			sqlState += " limit " + strconv.Itoa(sp.Offset) + ", " + strconv.Itoa(sp.Rows)
-		}
-
-		if sp.Enable {
-			if isSingle {
-				var singleResult string
-				if err := db.Raw(sqlState).Scan(&singleResult).Error; err != nil {
-					helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
-					return nil
-				}
-				// For searchsingle, result is put into 'data' key but value is the string result?
-				// Original code: resultStat["data"] = intoSingle
-				resultStat["data"] = singleResult
-			} else if isRow {
-				var rowResult map[string]interface{}
-				if err := db.Raw(sqlState).Scan(&rowResult).Error; err != nil {
-					helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
-					return nil
-				}
-				if rowResult != nil {
-					resultStat["data"] = rowResult
-				} else {
-					helpers.FailResponse(c, 401, "INVALID DATA RETRIEVED", "")
-					return nil
-				}
-			} else {
-				var rows []map[string]interface{}
-				if err := db.Raw(sqlState).Scan(&rows).Error; err != nil {
-					helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
-					return nil
-				}
-				resultStat["data"] = rows
-				if sp.Paging {
-					if len(rows) > 0 {
-						if sp.Page == 0 {
-							resultStat["page"] = 1
-						} else {
-							resultStat["page"] = sp.Page
-						}
-					} else {
-						resultStat["page"] = 0
-					}
-					resultStat["rows"] = sp.Rows
-				}
-			}
-
-			wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
-			c.Locals("wfEngine", wfEngine)
-			helpers.SuccessResponse(c, "DATA RETRIEVED", resultStat)
-		} else {
-			helpers.SuccessResponse(c, "DATA RETRIEVED", sqlState)
-		}
-	} else {
-		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA RETRIEVED", "EMPTY_QUERY")
-	}
-
-	return nil
-}
-
-func handleSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
-	return handleGenericSearch(c, params, db, "", false, false)
-}
-
-func handleSearchRow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
-	return handleGenericSearch(c, params, db, "row", false, true)
-}
-
-func handleSearchSingle(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
-	return handleGenericSearch(c, params, db, "single", true, false)
-}
-
-func handleStoreProcedure(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
-	var (
-		procName string
-		paramStr string
-		enable   = true
-	)
-
-	for _, p := range params {
-		switch p.InputName {
-		case "paramname":
-			paramStr = strings.TrimSpace(p.CompValue)
-		case "procedurename":
-			procName = strings.TrimSpace(p.CompValue)
-		case "enablesp":
-			if strings.EqualFold(p.CompValue, "false") {
-				enable = false
-			}
-		}
-	}
-
-	if procName == "" {
-		return errors.New("INVALID_PROCEDURE_NAME")
-	}
-
-	paramList := []string{}
-	if paramStr != "" {
-		paramList = strings.Split(paramStr, ",")
-	}
-
-	var placeholders []string
-	for _, p := range paramList {
-		placeholders = append(placeholders, ":"+strings.TrimSpace(p))
-	}
-
-	sql := fmt.Sprintf("CALL %s(%s)", procName, strings.Join(placeholders, ","))
-
-	if !enable {
-		helpers.SuccessResponse(c, "DATA RETRIEVED", sql)
-	}
-
-	// Eksekusi stored procedure (dummy)
-	if err := db.Exec(sql).Error; err != nil {
-		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
-	}
-	var wfEngine = c.Locals("wfEngine").([]WorkflowEngine)
-	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: paramStr, ResultNode: "OK"})
-	c.Locals("wfEngine", wfEngine)
-	return nil
-}
-
-func handleSendEmail(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
-	var wfEngine = c.Locals("wfEngine").([]WorkflowEngine)
-	emailSender, err := email.NewEmailSender()
-	if err != nil {
-		helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_EMAIL", err.Error())
-	}
-
-	mailTo := ""
-	mailHeader := ""
-	mailContent := ""
-	enable := true
-
-	for _, v := range params {
-		switch v.InputName {
-		case "mailto":
-			mailTo = strings.TrimSpace(v.CompValue)
-		case "mailheader":
-			mailHeader = strings.TrimSpace(v.CompValue)
-		case "mailcontent":
-			mailContent = strings.TrimSpace(v.CompValue)
-		case "enableemail":
-			if v.CompValue == "false" {
-				enable = false
-			}
-		}
-	}
-
-	wfEngine = append(wfEngine, WorkflowEngine{
-		DataInputNode: "",
-		ResultNode:    "OK",
+// Component registration - only native Start and End
+func init() {
+	RegisterComponent("start", func(ctx *WorkflowContext) error {
+		return handleStart(ctx.FiberCtx)
 	})
-	c.Locals("wfEngine", wfEngine)
-	if enable {
-		return emailSender.Send(mailTo, mailHeader, mailContent)
-	}
-
-	return nil
-}
-
-func handleReportServer(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
-	var (
-		vParameter  string
-		vReportName string
-		vReportType string
-	)
-
-	dataPrint := make(map[string]string)
-
-	// Ambil parameter dari workflow
-	for _, v := range params {
-		switch v.InputName {
-		case "reportname":
-			vReportName = strings.TrimSpace(v.CompValue)
-		case "parameter":
-			vParameter = strings.TrimSpace(v.CompValue)
-		case "reporttype":
-			vReportType = strings.TrimSpace(v.CompValue)
-		}
-	}
-
-	// Parsing parameter tambahan
-	vParams := strings.Split(vParameter, ",")
-	for _, v := range vParams {
-		dataPrint[v] = GetSearchText(c, []string{"POST"}, v, "", "string")
-		dataPrint["title"+v] = v
-	}
-
-	lang := c.FormValue("lang")
-	userName := c.Locals("username").(string)
-	dataPrint["j_username"] = configs.ConfigApps.ReportUser
-	dataPrint["j_password"] = configs.ConfigApps.ReportPass
-	dataPrint["titlereport"] = i18n.Translate(lang, vReportName, nil)
-	dataPrint["titlerecordstatus"] = i18n.Translate(lang, "RECORD_STATUS", nil)
-	dataPrint["titlecompany"] = configs.ConfigApps.AppName
-	dataPrint["titleuser"] = i18n.Translate(lang, "PRINT_BY", nil) + " " + userName
-
-	timeOut, _ := strconv.Atoi(configs.ConfigApps.ReportTime)
-	query := url.Values{}
-	for k, v := range dataPrint {
-		query.Add(k, v)
-	}
-
-	var (
-		fullUrl     string
-		contentType string
-		fileExt     string
-	)
-
-	switch strings.ToUpper(vReportType) {
-	case "PDF":
-		fileExt = "pdf"
-		contentType = "application/pdf"
-	case "XLS", "XLSX":
-		fileExt = "xlsx"
-		contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-	case "CSV":
-		fileExt = "csv"
-		contentType = "text/csv"
-	default:
-		return helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_REPORT_TYPE", vReportType)
-	}
-
-	fullUrl = fmt.Sprintf("%s/%s.%s?%s", configs.ConfigApps.ReportUrl, vReportName, fileExt, query.Encode())
-
-	data, err := helpers.GetRemoteData(fullUrl, timeOut)
-	if err != nil {
-		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
-	}
-
-	if len(data) == 0 {
-		return helpers.FailResponse(c, fiber.StatusNotFound, "EMPTY_REPORT", vReportName)
-	}
-
-	// Set header agar file langsung di-download
-	c.Set("Cache-Control", "no-cache")
-	c.Set("Content-Type", contentType)
-	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.%s"`, vReportName, fileExt))
-	c.Set("Content-Length", strconv.Itoa(len(data)))
-
-	return c.Send(data)
-}
-
-func cSaveFile(fileHeader *multipart.FileHeader, dest string) error {
-	src, err := fileHeader.Open()
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-	out, err := os.Create(dest)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = out.ReadFrom(src)
-	return err
-}
-
-func handleImportData(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, fileHeader *multipart.FileHeader, search bool) error {
-	var (
-		column          string
-		insertParameter string
-		spInsert        string
-		updateParameter string
-		spUpdate        string
-		method          string
-		enable          = true
-	)
-
-	// 🔹 Ekstrak parameter
-	for _, p := range params {
-		switch p.InputName {
-		case "column":
-			column = strings.TrimSpace(p.CompValue)
-		case "insertparameter":
-			insertParameter = strings.TrimSpace(p.CompValue)
-		case "spinsert":
-			spInsert = strings.TrimSpace(p.CompValue)
-		case "updateparameter":
-			updateParameter = strings.TrimSpace(p.CompValue)
-		case "importtype":
-			method = strings.ToLower(strings.TrimSpace(p.CompValue))
-		case "spupdate":
-			spUpdate = strings.TrimSpace(p.CompValue)
-		case "enableimport":
-			if p.CompValue == "false" {
-				enable = false
-			}
-		}
-	}
-
-	// 🔹 Simpan file ke "uploads/"
-	saveDir := "uploads"
-	if err := os.MkdirAll(saveDir, os.ModePerm); err != nil {
-		return err
-	}
-	savePath := filepath.Join(saveDir, filepath.Base(fileHeader.Filename))
-	if err := cSaveFile(fileHeader, savePath); err != nil {
-		return err
-	}
-
-	// 🔹 Baca Excel
-	f, err := excelize.OpenFile(savePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	sheet := f.GetSheetName(0)
-	fmt.Printf("heet %s", sheet)
-	rows, err := f.GetRows(sheet)
-	fmt.Printf("ow %v", rows)
-	if err != nil {
-		return err
-	}
-
-	if len(rows) < 2 {
-		return fmt.Errorf("no data found in Excel")
-	}
-	var sqlStr string
-
-	// 🔹 Jalankan transaksi (rollback kalau error)
-	return db.Transaction(func(tx *gorm.DB) error {
-		for i := 1; i < len(rows); i++ {
-			colMap := map[string]string{}
-			colDefs := strings.Split(column, ",")
-			for _, def := range colDefs {
-				parts := strings.Split(def, "=")
-				if len(parts) != 2 {
-					continue
-				}
-				colName := strings.TrimSpace(parts[0])
-				colIndex := strings.TrimSpace(parts[1])
-				val, err := f.GetCellValue(sheet, fmt.Sprintf("%s%d", colIndex, i+1))
-
-				if err != nil {
-					continue
-				}
-				colMap[colName] = val
-			}
-
-			isEmpty := false
-			for _, v := range colMap {
-				if strings.TrimSpace(v) == "" {
-					isEmpty = true
-					break
-				}
-			}
-
-			var params []string
-
-			if isEmpty {
-				params = strings.Split(insertParameter, ",")
-				if method == "table" {
-					fields, vals := []string{}, []string{}
-					for _, p := range params {
-						p = strings.TrimSpace(p)
-						fields = append(fields, p)
-						vals = append(vals, fmt.Sprintf("'%s'", colMap[p]))
-					}
-					sqlStr = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", spInsert, strings.Join(fields, ","), strings.Join(vals, ","))
-				} else {
-					bind := []string{}
-					for _, p := range params {
-						bind = append(bind, p)
-					}
-					sqlStr = fmt.Sprintf("CALL %s(%s)", spInsert, strings.Join(bind, ","))
-				}
-			} else {
-				params = strings.Split(updateParameter, ",")
-				if method == "table" {
-					id := params[0]
-					set := []string{}
-					for _, p := range params[1:] {
-						set = append(set, fmt.Sprintf("%s='%s'", p, colMap[p]))
-					}
-					sqlStr = fmt.Sprintf("UPDATE %s SET %s WHERE %s='%s'", spUpdate, strings.Join(set, ","), id, colMap[id])
-				} else {
-					bind := []string{}
-					for _, p := range params {
-						bind = append(bind, p)
-					}
-					sqlStr = fmt.Sprintf("CALL %s(%s)", spUpdate, strings.Join(bind, ","))
-				}
-			}
-
-			if !enable {
-				fmt.Println("Preview SQL:", sqlStr)
-				continue
-			}
-
-			// 🔹 Jalankan dengan GORM
-			args := []interface{}{}
-			for _, p := range params {
-				args = append(args, colMap[p])
-			}
-			if err := tx.Exec(sqlStr).Error; err != nil {
-				log.Printf("Row %d failed: %v", i+1, err)
-				return err // rollback
-			}
-		}
-		if !enable {
-			helpers.FailResponse(c, 401, "INVALID DATA UPLOADED", sqlStr)
-		} else {
-			helpers.SuccessResponse(c, "DATA UPLOADED", "Filename "+fileHeader.Filename+" Size "+fmt.Sprintf("%d", fileHeader.Size))
-		}
+	RegisterComponent("end", func(ctx *WorkflowContext) error {
 		return nil
-	})
-}
-
-func handleDecision(c *fiber.Ctx, params []WorkflowDetailResult) (string, bool, error) {
-	decisionParamType := ""
-	val := ""
-	var wfEngine = c.Locals("wfEngine").([]WorkflowEngine)
-	enable := true
-	contentDecision := ""
-	decision := true
-	for _, v := range params {
-		switch v.InputName {
-		case "decisionok":
-			contentDecision = v.CompValue
-		case "decisionparamtype":
-			decisionParamType = strings.ToLower(v.CompValue)
-		case "enabledecision":
-			if v.CompValue == "false" {
-				enable = false
-			}
-		}
-	}
-
-	if strings.Contains(contentDecision, "=") {
-		data := strings.SplitN(contentDecision, "=", 2)
-		key := data[0]
-		expected := data[1]
-
-		switch strings.ToLower(decisionParamType) {
-		case "post":
-			val = c.FormValue(key)
-			if !enable {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "VALUE_DECISION")
-			}
-			if expected == "empty" {
-				decision = val == ""
-			} else if val == expected {
-				decision = true
-			}
-
-		case "get":
-			val = c.Query(key)
-			if !enable {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "VALUE_DECISION")
-			}
-			if expected == "empty" {
-				decision = val == ""
-			} else if val == expected {
-				decision = true
-			}
-
-		case "node result":
-			val = wfEngine[len(wfEngine)-1].ResultNode.(string)
-			if !enable {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "VALUE_DECISION")
-			}
-			if expected == "empty" {
-				decision = val == ""
-			} else if val == expected {
-				decision = true
-			}
-
-		default:
-			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", "VALUE_DECISION")
-		}
-	}
-
-	return contentDecision, decision, nil
-}
-
-func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error {
-	var (
-		param     string
-		tablename string
-		method    string
-		enable    = true
-	)
-
-	for _, p := range params {
-		switch p.InputName {
-		case "tableparam":
-			param = strings.TrimSpace(p.CompValue)
-		case "table":
-			tablename = strings.TrimSpace(p.CompValue)
-		case "method":
-			method = strings.ToLower(strings.TrimSpace(p.CompValue))
-		case "enabletable":
-			if p.CompValue == "false" {
-				enable = false
-			}
-		}
-	}
-
-	listOldParam := strings.Split(param, ",")
-	postData := map[string]string{}
-
-	// ambil semua data POST
-	form, _ := c.MultipartForm()
-	if form != nil {
-		for key, val := range form.Value {
-			postData[key] = val[0]
-		}
-	}
-
-	// build parameter baru
-	newParam := map[string]interface{}{}
-	for _, key := range listOldParam {
-		if strings.Contains(key, "=") {
-			parts := strings.SplitN(key, "=", 2)
-			val := c.Query(parts[1])
-			if val == "" {
-				val = c.FormValue(parts[1])
-			}
-			newParam[parts[0]] = val
-		} else {
-			if val, ok := postData[key]; ok {
-				newParam[key] = val
-			} else {
-				newParam[key] = 1
-			}
-		}
-	}
-
-	// mulai proses SQL dinamis
-	switch method {
-	case "insert":
-		if enable {
-			result := db.Table(tablename).Create(newParam)
-			if result.Error != nil {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA CREATE", "TABLE "+tablename)
-				return result.Error
-			}
-
-			var lastID int64
-			db.Raw("SELECT LAST_INSERT_ID()").Scan(&lastID)
-			postData["lastid"] = fmt.Sprint(lastID)
-			helpers.SuccessResponse(c, "DATA SAVED", "")
-		} else {
-			result := db.Table(tablename).Session(&gorm.Session{DryRun: true}).Create(newParam)
-			rawQuery := result.Statement.SQL.String()
-			rawVars := result.Statement.Vars
-			helpers.SuccessResponse(c, "DATA SAVED", map[string]interface{}{
-				"sql":  rawQuery,
-				"vars": rawVars,
-			})
-		}
-
-	case "update":
-		idField := listOldParam[0]
-		idValue := postData[idField]
-		delete(newParam, idField)
-
-		if enable {
-			result := db.Table(tablename).Where(fmt.Sprintf("%s = ?", idField), idValue).Updates(newParam)
-			if result.Error != nil {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA UPDATE", "TABLE "+tablename)
-				return result.Error
-			}
-			helpers.SuccessResponse(c, "DATA SAVED", "")
-		} else {
-			result := db.Table(tablename).Where(fmt.Sprintf("%s = ?", idField), idValue).Session(&gorm.Session{DryRun: true}).Updates(newParam)
-			rawQuery := result.Statement.SQL.String()
-			rawVars := result.Statement.Vars
-			helpers.SuccessResponse(c, "DATA SAVED", map[string]interface{}{
-				"sql":  rawQuery,
-				"vars": rawVars,
-			})
-		}
-
-	case "purge":
-		idField := listOldParam[0]
-		idValue := postData[idField]
-		sqlment := fmt.Sprintf("delete from %s where %s = %s", tablename, idField, idValue)
-
-		if enable {
-			result := db.Exec(sqlment)
-			if result.Error != nil {
-				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA PURGE", "TABLE "+tablename)
-				return result.Error
-			}
-			helpers.SuccessResponse(c, "DATA SAVED", "")
-		} else {
-			helpers.FailResponse(c, 401, "INVALID_DATA SAVED", sqlment)
-		}
-
-	default:
-		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA UPDATE", "TABLE "+tablename)
-	}
-	return nil
-}
-
-func handleWorkflow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, search bool) error {
-	wfName := ""
-	enable := true
-	for _, v := range params {
-		switch v.InputName {
-		case "workflowname":
-			wfName = strings.TrimSpace(v.CompValue)
-		//case "workflowparameter":
-		//	wfParameter = strings.TrimSpace(v.CompValue)
-		case "enableworkflow":
-			if v.CompValue == "false" {
-				enable = false
-			}
-		}
-	}
-	if enable {
-		return ExecuteFlow(c, db, wfName, search)
-	} else {
-		return nil
-	}
-}
-
-func handleBrevo(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error {
-	var (
-		apiKey  string
-		mailTo  string
-		subject string
-		body    string
-		enable  = true
-	)
-
-	for _, p := range params {
-		switch strings.ToLower(p.InputName) {
-		case "brevoapikey":
-			apiKey = strings.TrimSpace(p.CompValue)
-		case "mailto":
-			mailTo = strings.TrimSpace(p.CompValue)
-		case "subject":
-			subject = strings.TrimSpace(p.CompValue)
-		case "body":
-			body = strings.TrimSpace(p.CompValue)
-		case "enablebrevo":
-			if strings.EqualFold(p.CompValue, "false") {
-				enable = false
-			}
-		}
-	}
-
-	if !enable {
-		return c.Status(200).JSON(fiber.Map{
-			"status":  "skipped",
-			"message": "Brevo email disabled by workflow",
-		})
-	}
-
-	if apiKey == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error":   "missing_apikey",
-			"message": "Brevo API Key is required",
-		})
-	}
-
-	// Simple Brevo API implementation for sending transactional email
-	url := "https://api.brevo.com/v3/smtp/email"
-
-	payload := map[string]interface{}{
-		"sender": map[string]string{
-			"name":  "ERP System", // You might want to make this configurable too
-			"email": "no-reply@example.com",
-		},
-		"to": []map[string]string{
-			{
-				"email": mailTo,
-			},
-		},
-		"subject":     subject,
-		"htmlContent": body,
-	}
-
-	jsonPayload, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return err
-	}
-
-	req.Header.Set("accept", "application/json")
-	req.Header.Set("api-key", apiKey)
-	req.Header.Set("content-type", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode >= 300 {
-		return c.Status(resp.StatusCode).JSON(fiber.Map{
-			"error":   "brevo_error",
-			"details": string(respBody),
-		})
-	}
-
-	var wfEngine = c.Locals("wfEngine").([]WorkflowEngine)
-	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: "Email Sent"})
-	c.Locals("wfEngine", wfEngine)
-
-	return c.Status(200).JSON(fiber.Map{
-		"status":  "success",
-		"message": "Email sent successfully",
-	})
-}
-
-func handleApi(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error {
-	var (
-		apiServer     string
-		parameterName string
-		enable        = true
-	)
-
-	// Ambil nilai dari workflow parameters
-	for _, p := range params {
-		switch strings.ToLower(p.InputName) {
-		case "url":
-			apiServer = strings.TrimSpace(p.CompValue)
-
-		case "parametername":
-			parameterName = strings.TrimSpace(p.CompValue)
-
-		case "enableapi":
-			enable = !(strings.ToLower(p.CompValue) == "false")
-		}
-	}
-
-	// Jika disable dari workflow
-	if !enable {
-		return c.Status(200).JSON(fiber.Map{
-			"status":  "skipped",
-			"message": "API calling disabled by workflow",
-		})
-	}
-
-	// URL wajib ada
-	if apiServer == "" {
-		return c.Status(400).JSON(fiber.Map{
-			"error":   "missing_url",
-			"message": "Parameter 'url' belum diisi",
-		})
-	}
-
-	// HTTP client
-	client := &http.Client{
-		Timeout: 20 * time.Second,
-	}
-
-	var (
-		req *http.Request
-		err error
-	)
-
-	// Jika parameter kosong → GET
-	if parameterName == "" {
-		req, err = http.NewRequest("GET", apiServer, nil)
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-	} else {
-		// Jika parameter ada → POST JSON body
-		body := map[string]interface{}{
-			"parameter": parameterName,
-		}
-
-		jsonBody, _ := json.Marshal(body)
-
-		req, err = http.NewRequest("POST", apiServer, bytes.NewBuffer(jsonBody))
-		if err != nil {
-			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
-		}
-		req.Header.Set("Content-Type", "application/json")
-	}
-
-	// Eksekusi call
-	resp, err := client.Do(req)
-	if err != nil {
-		return c.Status(500).JSON(fiber.Map{
-			"error":   "api_call_failed",
-			"message": err.Error(),
-		})
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-
-	// Status code error
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return c.Status(resp.StatusCode).JSON(fiber.Map{
-			"error":          "api_error",
-			"http_status":    resp.StatusCode,
-			"response_error": string(respBody),
-		})
-	}
-
-	// Sukses → return hasil API
-	return c.Status(200).JSON(fiber.Map{
-		"status":   "success",
-		"url":      apiServer,
-		"method":   req.Method,
-		"response": json.RawMessage(respBody),
 	})
 }
 
@@ -1393,57 +243,92 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 	component.IsRun = true
 	fmt.Printf("Running workflowid: %d component: %s (ID: %d)\n", workflowId, component.Name, component.ID)
 
+	// Start timing
+	startTime := time.Now()
+
 	workflowDetailResult, err := GetWorkflowDetail(db, component.Name, workflowId, nodeId)
 	if err != nil {
+		// Record failed step
+		appendStepResult(c, workflowId, nodeId, component.Name, nil, nil, false, 0, err.Error())
 		return err
 	}
 
-	var Decision bool
-	switch strings.ToLower(component.Name) {
-	case "start":
-		err = handleStart(c)
-	case "sendmessage":
-		err = handleSendMessage(c, workflowDetailResult)
-	case "savelog":
-		err = handleSaveLog(c, workflowDetailResult, db, search)
-	case "search":
-		err = handleSearch(c, workflowDetailResult, db, search)
-	case "searchsingle":
-		err = handleSearchSingle(c, workflowDetailResult, db, search)
-	case "searchrow":
-		err = handleSearchRow(c, workflowDetailResult, db, search)
-	case "storeprocedure":
-		err = handleStoreProcedure(c, workflowDetailResult, db, search)
-	case "sendemail":
-		err = handleSendEmail(c, workflowDetailResult, db, search)
-	case "reportserver":
-		err = handleReportServer(c, workflowDetailResult, db, search)
-	case "importdata":
+	// Prepare input params for tracking
+	inputParams := make(map[string]string)
+	for _, p := range workflowDetailResult {
+		if p.CompValue != "" {
+			inputParams[p.InputName] = p.CompValue
+		}
+	}
+
+	// Create context for the component
+	ctx := &WorkflowContext{
+		FiberCtx: c,
+		DB:       db,
+		Params:   workflowDetailResult,
+		Search:   search,
+	}
+
+	// Handle special cases for context population
+	if strings.ToLower(component.Name) == "importdata" {
 		file, _ := c.FormFile("file-modules")
-		err = handleImportData(c, workflowDetailResult, db, file, search)
-	case "decision":
-		_, Decision, err = handleDecision(c, workflowDetailResult)
-	case "table":
-		err = handleTable(c, workflowDetailResult, db)
-	case "workflow":
-		err = handleWorkflow(c, workflowDetailResult, db, search)
-	case "api":
-		err = handleApi(c, workflowDetailResult, db)
-	case "brevoapi":
-		err = handleBrevo(c, workflowDetailResult, db)
-	case "End":
+		ctx.FileHeader = file
+	}
+
+	// Execute component
+	if strings.EqualFold(component.Name, "End") {
 		flowTerminated = true
+		c.Locals("flowTerminated", true)
+		execTime := float64(time.Since(startTime).Milliseconds())
+		appendStepResult(c, workflowId, nodeId, component.Name, inputParams, "Flow ended", true, execTime, "")
 		return nil
 	}
 
-	if err != nil {
-		return err
+	handler, exists := GetComponent(component.Name)
+	if exists {
+		if err := handler.Execute(ctx); err != nil {
+			execTime := float64(time.Since(startTime).Milliseconds())
+			appendStepResult(c, workflowId, nodeId, component.Name, inputParams, nil, false, execTime, err.Error())
+			return err
+		}
+	} else {
+		execTime := float64(time.Since(startTime).Milliseconds())
+		appendStepResult(c, workflowId, nodeId, component.Name, inputParams, nil, false, execTime, fmt.Sprintf("unknown component: %s", component.Name))
+		return fmt.Errorf("unknown component: %s", component.Name)
 	}
 
-	// Jika komponen adalah Decision
-	if component.Name == "Decision" {
+	// Record execution time and get the last result from wfEngine
+	execTime := float64(time.Since(startTime).Milliseconds())
+
+	// Get any result that might have been set by the component
+	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+	var stepResult any = "OK"
+	if len(wfEngine) > 0 {
+		lastResult := wfEngine[len(wfEngine)-1]
+		if lastResult.ResultNode != nil {
+			stepResult = lastResult.ResultNode
+		}
+	}
+
+	// Update the last step with component info if it was just added, or add new one
+	if len(wfEngine) > 0 && wfEngine[len(wfEngine)-1].ComponentName == "" {
+		// Component already appended result, update with metadata
+		wfEngine[len(wfEngine)-1].WorkflowId = workflowId
+		wfEngine[len(wfEngine)-1].NodeId = nodeId
+		wfEngine[len(wfEngine)-1].ComponentName = component.Name
+		wfEngine[len(wfEngine)-1].DataInputNode = inputParams
+		wfEngine[len(wfEngine)-1].Success = true
+		wfEngine[len(wfEngine)-1].ExecutionTime = execTime
+		c.Locals("wfEngine", wfEngine)
+	} else {
+		// Component didn't append, add our own tracking
+		appendStepResult(c, workflowId, nodeId, component.Name, inputParams, stepResult, true, execTime, "")
+	}
+
+	// Handle Decision flow
+	if strings.EqualFold(component.Name, "Decision") {
 		var outputs IO
-		if Decision {
+		if ctx.DecisionResult {
 			outputs = component.Outputs["output_1"]
 		} else {
 			outputs = component.Outputs["output_2"]
@@ -1459,8 +344,7 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		}
 		return nil
 	} else {
-
-		// Untuk node biasa, lanjut ke semua output berurutan
+		// Standard flow
 		for _, output := range component.Outputs {
 			for _, conn := range output.Connections {
 				nextNodeId, _ := strconv.Atoi(conn.Node)
@@ -1479,12 +363,28 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 	return nil
 }
 
+// appendStepResult adds a step result to the workflow engine
+func appendStepResult(c *fiber.Ctx, workflowId int, nodeId int, componentName string, input any, result any, success bool, execTime float64, errMsg string) {
+	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+	wfEngine = append(wfEngine, WorkflowEngine{
+		WorkflowId:    workflowId,
+		NodeId:        nodeId,
+		ComponentName: componentName,
+		DataInputNode: input,
+		ResultNode:    result,
+		Success:       success,
+		ExecutionTime: execTime,
+		Error:         errMsg,
+	})
+	c.Locals("wfEngine", wfEngine)
+}
+
 func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error {
 	var components = []Component{}
 	var wfEngine = []WorkflowEngine{}
 	var flowTerminated = false
 
-	// === 1️⃣ Ambil parameter workflow ===
+	// Get workflow parameters
 	var params []models.Workflowparameter
 	if err := db.
 		Table("workflowparameter a").
@@ -1495,13 +395,13 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 		return err
 	}
 
-	// === 2️⃣ Inisialisasi parameter default ===
+	// Initialize default parameters
 	postData := make(map[string]interface{})
 	for _, p := range params {
 		postData[p.Parametername] = nil
 	}
 
-	// === 3️⃣ Ambil definisi workflow utama ===
+	// Get workflow definition
 	var wf models.Workflow
 	if err := db.
 		Where("wfname = ?", flowName).
@@ -1512,19 +412,19 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 		return errors.New("INVALID_WORKFLOW")
 	}
 
-	// === 4️⃣ Decode JSON flow ke struktur data ===
+	// Decode JSON flow
 	var flow FlowData
 	if err := json.Unmarshal([]byte(wf.Flow), &flow); err != nil {
 		return fmt.Errorf("failed to decode flow JSON: %w", err)
 	}
 
-	// === 5️⃣ Konversi map → slice agar bisa diurutkan ===
+	// Convert map to slice
 	for _, comp := range flow.Drawflow.Home.Data {
 		comp.WorkflowId = wf.Workflowid
 		components = append(components, comp)
 	}
 
-	// === 6️⃣ Bangun graph koneksi antar node ===
+	// Build connection graph
 	graph := make(map[int][]int)
 	inDegree := make(map[int]int)
 	for _, comp := range components {
@@ -1541,7 +441,7 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 		}
 	}
 
-	// === 7️⃣ Temukan node awal (Start node: inDegree == 0) ===
+	// Find start nodes (inDegree == 0)
 	queue := []int{}
 	for id, deg := range inDegree {
 		if deg == 0 {
@@ -1549,7 +449,7 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 		}
 	}
 
-	// === 8️⃣ Urutkan node secara topologis ===
+	// Topological sort
 	ordered := []Component{}
 	visited := make(map[int]bool)
 
@@ -1578,7 +478,7 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 		}
 	}
 
-	// === 9️⃣ Jika ada node tidak terhubung, tambahkan ke akhir ===
+	// Add disconnected nodes
 	if len(ordered) < len(components) {
 		for _, comp := range components {
 			if !visited[comp.ID] {
@@ -1587,11 +487,7 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 		}
 	}
 
-	// === 🔟 Debug: tampilkan urutan flow ===
-	//out, _ := json.MarshalIndent(ordered, "", "  ")
-	//fmt.Println("Ordered flow:", string(out))
-
-	// === 11️⃣ Siapkan transaksi database ===
+	// Setup database transaction
 	var tx *gorm.DB
 	if !search {
 		tx = db.Begin()
@@ -1609,17 +505,15 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 	c.Locals("wfEngine", wfEngine)
 	c.Locals("flowTerminated", flowTerminated)
 
-	// === 12️⃣ Eksekusi tiap komponen sesuai urutan ===
-	//for _, comp := range ordered {
+	// Execute workflow starting from first component
 	if err := InternalFlow(c, ordered[0], int(wf.Workflowid), ordered[0].ID, tx, search); err != nil {
 		if !search {
 			tx.Rollback()
 		}
 		return fmt.Errorf("internal flow failed on component %d (%s): %w", ordered[0].ID, ordered[0].Name, err)
 	}
-	//}
 
-	// === 13️⃣ Commit transaksi ===
+	// Commit transaction
 	if !search {
 		if err := tx.Commit().Error; err != nil {
 			return fmt.Errorf("commit failed: %w", err)

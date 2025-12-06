@@ -8,45 +8,45 @@ import (
 )
 
 type Config struct {
-	AppName          string
-	AppEnv           string
-	AppPort          string
-	AllowOrigin      string
-	ReadBufferSize   string
-	CaseSensitive    string
-	Concurrency      string
-	BodyLimit        string
-	DBDriver         string
-	DBHost           string
-	DBPort           string
-	DBUser           string
-	DBPass           string
-	DBName           string
-	DBIdleConn       string
-	DBMaxConn        string
-	DateToDb         string
-	DateFromDb       string
-	DisableKeepAlive string
-	JwtSecret        string
-	JwtTtlHour       string
-	LimiterMax       string
-	LimiterExpire    string
-	LogMode          string
-	LogFile          string
-	LogRemote        string
-	LogDb            string
-	CacheType        string
-	CacheAddr        string
-	CachePass        string
-	CacheDB          string
-	ReportUrl        string
-	ReportUser       string
-	ReportPass       string
-	ReportTime       string
-	SwaggerActive    string
-	StorageType      string
-	WriteBufferSize  string
-	Modules          []string
+	AppName               string
+	AppEnv                string
+	AppPort               string
+	AllowOrigin           string
+	ReadBufferSize        string
+	CaseSensitive         string
+	Concurrency           string
+	BodyLimit             string
+	DBDriver              string
+	DBHost                string
+	DBPort                string
+	DBUser                string
+	DBPass                string
+	DBName                string
+	DBIdleConn            string
+	DBMaxConn             string
+	DBAutoMigrate         string
+	DBSeed                string
+	DateToDb              string
+	DateFromDb            string
+	DisableKeepAlive      string
+	JwtSecret             string
+	JwtTtlHour            string
+	LimiterMax            string
+	LimiterExpire         string
+	LogMode               string
+	LogFile               string
+	LogRemote             string
+	LogDb                 string
+	CacheType             string
+	CacheAddr             string
+	CachePass             string
+	CacheDB               string
+	ReportUrl             string
+	ReportUser            string
+	ReportPass            string
+	ReportTime            string
+	WriteBufferSize       string
+	ExternalComponentPath string
 }
 
 var ConfigApps *Config
@@ -57,44 +57,45 @@ func LoadConfig() {
 	}
 
 	ConfigApps = &Config{
-		AppName:          getEnv("APP_NAME", ""),
-		AppEnv:           getEnv("APP_ENV", ""),
-		AppPort:          getEnv("APP_PORT", ""),
-		AllowOrigin:      getEnv("ALLOW_ORIGIN", ""),
-		BodyLimit:        getEnv("BODY_LIMIT", ""),
-		CaseSensitive:    getEnv("CASE_SENSITIVE", ""),
-		Concurrency:      getEnv("CONCURRENCY", ""),
-		DBDriver:         getEnv("DB_DRIVER", ""),
-		DBHost:           getEnv("DB_HOST", ""),
-		DBPort:           getEnv("DB_PORT", ""),
-		DBUser:           getEnv("DB_USER", ""),
-		DBPass:           getEnv("DB_PASS", ""),
-		DBName:           getEnv("DB_NAME", ""),
-		DBIdleConn:       getEnv("DB_IDLE_CONN", ""),
-		DBMaxConn:        getEnv("DB_MAX_CONN", ""),
-		DateToDb:         getEnv("DATE_TO_DB", ""),
-		DateFromDb:       getEnv("DATE_FROM_DB", ""),
-		DisableKeepAlive: getEnv("DISABLE_KEEP_ALIVE", ""),
-		JwtSecret:        getEnv("JWT_SECRET", ""),
-		JwtTtlHour:       getEnv("JWT_TTL_HOUR", ""),
-		LimiterMax:       getEnv("LIMITER_MAX", ""),
-		LimiterExpire:    getEnv("LIMITER_EXPIRE", ""),
-		LogMode:          getEnv("LOG_MODE", ""),
-		LogFile:          getEnv("LOG_FILE", ""),
-		LogRemote:        getEnv("LOG_REMOTE", ""),
-		LogDb:            getEnv("LOG_DB", ""),
-		CacheType:        getEnv("CACHE_TYPE", ""),
-		CacheAddr:        getEnv("CACHE_ADDR", ""),
-		CachePass:        getEnv("CACHE_PASS", ""),
-		CacheDB:          getEnv("CACHE_DB", ""),
-		ReadBufferSize:   getEnv("READ_BUFFER_SIZE", ""),
-		ReportUrl:        getEnv("REPORT_URL", ""),
-		ReportUser:       getEnv("REPORT_USER", ""),
-		ReportPass:       getEnv("REPORT_PASS", ""),
-		ReportTime:       getEnv("REPORT_TIME", ""),
-		SwaggerActive:    getEnv("SWAGGER_ACTIVE", ""),
-		StorageType:      getEnv("STORAGE_TYPE", ""),
-		WriteBufferSize:  getEnv("WRITE_BUFFER_SIZE", ""),
+		AppName:               getEnv("APP_NAME", ""),
+		AppEnv:                getEnv("APP_ENV", ""),
+		AppPort:               getEnv("APP_PORT", ""),
+		AllowOrigin:           getEnv("ALLOW_ORIGIN", ""),
+		BodyLimit:             getEnv("BODY_LIMIT", ""),
+		CaseSensitive:         getEnv("CASE_SENSITIVE", ""),
+		Concurrency:           getEnv("CONCURRENCY", ""),
+		DBDriver:              getEnv("DB_DRIVER", ""),
+		DBHost:                getEnv("DB_HOST", ""),
+		DBPort:                getEnv("DB_PORT", ""),
+		DBUser:                getEnv("DB_USER", ""),
+		DBPass:                getEnv("DB_PASS", ""),
+		DBName:                getEnv("DB_NAME", ""),
+		DBIdleConn:            getEnv("DB_IDLE_CONN", ""),
+		DBMaxConn:             getEnv("DB_MAX_CONN", ""),
+		DBAutoMigrate:         getEnv("DB_AUTO_MIGRATE", "false"),
+		DBSeed:                getEnv("DB_SEED", "false"),
+		DateToDb:              getEnv("DATE_TO_DB", ""),
+		DateFromDb:            getEnv("DATE_FROM_DB", ""),
+		DisableKeepAlive:      getEnv("DISABLE_KEEP_ALIVE", ""),
+		JwtSecret:             getEnv("JWT_SECRET", ""),
+		JwtTtlHour:            getEnv("JWT_TTL_HOUR", ""),
+		LimiterMax:            getEnv("LIMITER_MAX", ""),
+		LimiterExpire:         getEnv("LIMITER_EXPIRE", ""),
+		LogMode:               getEnv("LOG_MODE", ""),
+		LogFile:               getEnv("LOG_FILE", ""),
+		LogRemote:             getEnv("LOG_REMOTE", ""),
+		LogDb:                 getEnv("LOG_DB", ""),
+		CacheType:             getEnv("CACHE_TYPE", ""),
+		CacheAddr:             getEnv("CACHE_ADDR", ""),
+		CachePass:             getEnv("CACHE_PASS", ""),
+		CacheDB:               getEnv("CACHE_DB", ""),
+		ReadBufferSize:        getEnv("READ_BUFFER_SIZE", ""),
+		ReportUrl:             getEnv("REPORT_URL", ""),
+		ReportUser:            getEnv("REPORT_USER", ""),
+		ReportPass:            getEnv("REPORT_PASS", ""),
+		ReportTime:            getEnv("REPORT_TIME", ""),
+		WriteBufferSize:       getEnv("WRITE_BUFFER_SIZE", ""),
+		ExternalComponentPath: getEnv("EXTERNAL_COMPONENT_PATH", "./temp_external_components"),
 	}
 
 	// check .env details
@@ -133,9 +134,8 @@ func LoadConfig() {
 	helpers.IsEmptyLog(ConfigApps.ReportUser, "REPORT_USER", true)
 	helpers.IsEmptyLog(ConfigApps.ReportPass, "REPORT_PASS", true)
 	helpers.IsEmptyLog(ConfigApps.ReportTime, "REPORT_TIME", true)
-	helpers.IsEmptyLog(ConfigApps.SwaggerActive, "SWAGGER_ACTIVE", true)
-	helpers.IsEmptyLog(ConfigApps.StorageType, "STORAGE_TYPE", false)
 	helpers.IsEmptyLog(ConfigApps.WriteBufferSize, "WRITE_BUFFER_SIZE", true)
+	helpers.IsEmptyLog(ConfigApps.ExternalComponentPath, "EXTERNAL_COMPONENT_PATH", true)
 }
 
 func getEnv(key, fallback string) string {
