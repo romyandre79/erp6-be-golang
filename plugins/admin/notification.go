@@ -12,29 +12,26 @@ import (
 	"gorm.io/gorm"
 )
 
-// WebSocketHandler handles the websocket connection
+// Message types
+type WsPayload struct {
+	Type     string          `json:"type"`
+	TargetID int             `json:"target_id,omitempty"` // UserID to send to
+	Data     json.RawMessage `json:"data"`
+}
+
+// GlobalDB is set by routes.go for WebSocket handlers to access
+var GlobalDB *gorm.DB
+
 func WebSocketHandler(c *websocket.Conn) {
 	log.Println("WebSocketHandler: Started")
-	// useraccessid is set in locals by middleware
-
 	useridVal := c.Locals("userid")
-	log.Printf("WebSocketHandler: Locals(userid) = %v\n", useridVal)
-
 	if useridVal == nil {
-		log.Println("WebSocketHandler: userid is nil - closing connection")
 		c.Close()
 		return
 	}
-
 	useraccessid := useridVal.(int)
 
-	log.Printf("User %d connected\n", useraccessid)
-
-	info := &ws.RegisterInfo{
-		UserID: useraccessid,
-		Conn:   c,
-	}
-
+	info := &ws.RegisterInfo{UserID: useraccessid, Conn: c}
 	ws.GlobalHub.Register <- info
 
 	defer func() {
@@ -43,9 +40,50 @@ func WebSocketHandler(c *websocket.Conn) {
 	}()
 
 	for {
-		_, _, err := c.ReadMessage()
+		_, msg, err := c.ReadMessage()
 		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				log.Println("WS Read Error:", err)
+			}
 			break
+		}
+
+		log.Printf("WS Recv Raw: %s\n", string(msg))
+
+		// Parse generic payload
+		var payload WsPayload
+		if err := json.Unmarshal(msg, &payload); err != nil {
+			log.Println("WS Parse Error:", err)
+			continue
+		}
+
+		// If TargetID is present, route it
+		if payload.TargetID > 0 {
+			// Save to Database if type is 'chat'
+			if payload.Type == "chat" {
+				// We need to extract the text from the data map.
+				var dataMap map[string]interface{}
+				if err := json.Unmarshal(payload.Data, &dataMap); err == nil {
+					if text, ok := dataMap["text"].(string); ok {
+						// Get DB instance from somewhere - we need to pass it
+						// For now, use a global or inject it. Let's use a package-level var.
+						if GlobalDB != nil {
+							go SaveChatMessage(GlobalDB, useraccessid, payload.TargetID, text)
+						}
+					}
+				}
+			}
+
+			// Let's re-wrap to ensure sender is known
+			outData := map[string]interface{}{
+				"type":      payload.Type,
+				"sender_id": useraccessid,
+				"data":      payload.Data,
+			}
+			outBytes, _ := json.Marshal(outData)
+
+			log.Printf("WS Routing to %d: %s\n", payload.TargetID, string(outBytes))
+			ws.GlobalHub.SendToUser(payload.TargetID, outBytes)
 		}
 	}
 }
