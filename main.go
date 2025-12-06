@@ -3,6 +3,7 @@ package main
 import (
 	"erp6-be-golang/core/cache"
 	"erp6-be-golang/core/configs"
+	"erp6-be-golang/core/scheduler"
 
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/core/i18n"
@@ -95,6 +96,14 @@ func main() {
 	log.Print("End Load Plugin ...")
 
 	app.Static("/", "./public")
+
+	// Init Scheduler (after App creation)
+	scheduler.Init(app)
+	// Example handler
+	scheduler.RegisterHandler("test_job", func() {
+		log.Println("Hello from test_job!")
+	})
+	scheduler.LoadJobs(db)
 
 	app.Listen(":" + configs.ConfigApps.AppPort)
 }

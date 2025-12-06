@@ -206,6 +206,7 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 	flowName := c.FormValue("flowname")
 	search := c.FormValue("search")
 	menuName := c.FormValue("menu")
+	debug := c.FormValue("debug") // Enable step-by-step results
 	log.Info(c.FormValue("flow"))
 
 	if flowName == "" || search == "" || menuName == "" {
@@ -262,6 +263,16 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 	err = gendb.ExecuteFlow(c, db, flowName, bSearch)
 	if err != nil {
 		return helpers.FailResponse(c, 401, "INVALID_FLOW", err.Error())
+	}
+
+	// If debug mode, return step results
+	if debug == "true" {
+		wfEngine := c.Locals("wfEngine")
+		if wfEngine != nil {
+			return helpers.SuccessResponse(c, "FLOW_EXECUTED", fiber.Map{
+				"stepResults": wfEngine,
+			})
+		}
 	}
 
 	return nil
