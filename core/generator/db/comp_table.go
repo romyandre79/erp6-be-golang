@@ -80,7 +80,21 @@ func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 			}
 
 			var lastID int64
-			db.Raw("SELECT LAST_INSERT_ID()").Scan(&lastID)
+			driver := GetDatabaseDriver(db)
+			switch driver {
+			case "postgres":
+				db.Raw("SELECT LASTVAL()").Scan(&lastID)
+			case "sqlserver":
+				db.Raw("SELECT CAST(COALESCE(SCOPE_IDENTITY(), 0) AS BIGINT)").Scan(&lastID)
+			case "sqlite", "sqlite3":
+				db.Raw("SELECT last_insert_rowid()").Scan(&lastID)
+			case "oracle":
+				// Oracle with map insert makes capturing ID difficult without RETURNING clause support in finding the identity sequence
+				// Use 0 or handle specifically if needed.
+				lastID = 0
+			default: // mysql, mariadb
+				db.Raw("SELECT LAST_INSERT_ID()").Scan(&lastID)
+			}
 			postData["lastid"] = fmt.Sprint(lastID)
 			helpers.SuccessResponse(c, "DATA SAVED", "")
 		} else {

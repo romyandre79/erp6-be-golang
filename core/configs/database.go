@@ -6,8 +6,10 @@ import (
 	"log"
 	"strconv"
 
+	oracle "github.com/godoes/gorm-oracle"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 )
@@ -58,6 +60,35 @@ func EnsureDatabaseExists() error {
 		}
 		checkQuery = fmt.Sprintf("SELECT name FROM sys.databases WHERE name = '%s'", ConfigApps.DBName)
 		createQuery = fmt.Sprintf("CREATE DATABASE [%s]", ConfigApps.DBName)
+
+	case "sqlite", "sqlite3":
+		// SQLite creates database file automatically if it doesn't exist
+		// We just verify we can write to the path by opening it
+		// You often don't need a separate Ensure step for SQLite, but to be consistent:
+		db, err = gorm.Open(sqlite.Open(ConfigApps.DBName), &gorm.Config{})
+		if err != nil {
+			return fmt.Errorf("failed to connect to SQLite database: %v", err)
+		}
+		// No generic CREATE DATABASE command needed
+		// We can return early
+		sqlDB, _ := db.DB()
+		if sqlDB != nil {
+			sqlDB.Close()
+		}
+		return nil
+
+	case "oracle":
+		// Connect to Oracle
+		dsn := fmt.Sprintf("oracle://%s:%s@%s:%s/%s",
+			ConfigApps.DBUser, ConfigApps.DBPass, ConfigApps.DBHost, ConfigApps.DBPort, ConfigApps.DBName,
+		)
+		db, err = gorm.Open(oracle.Open(dsn), &gorm.Config{})
+		if err != nil {
+			return fmt.Errorf("failed to connect to Oracle database: %v", err)
+		}
+		// Oracle doesn't really have "CREATE DATABASE" in the same way (usually you connect to a SID/Service)
+		// We can check if we are connected.
+		return nil
 
 	default:
 		return fmt.Errorf("unsupported DB_DRIVER: %s", ConfigApps.DBDriver)
@@ -113,6 +144,14 @@ func InitDatabase() (*gorm.DB, error) {
 			ConfigApps.DBUser, ConfigApps.DBPass, ConfigApps.DBHost, ConfigApps.DBPort, ConfigApps.DBName,
 		)
 		dialector = sqlserver.Open(dsn)
+	case "sqlite", "sqlite3":
+		dialector = sqlite.Open(ConfigApps.DBName)
+	case "oracle":
+		// DSN format: oracle://user:password@localhost:1521/service_name
+		dsn := fmt.Sprintf("oracle://%s:%s@%s:%s/%s",
+			ConfigApps.DBUser, ConfigApps.DBPass, ConfigApps.DBHost, ConfigApps.DBPort, ConfigApps.DBName,
+		)
+		dialector = oracle.Open(dsn)
 	default:
 		helpers.IsEmptyLog("Unsupported DB_DRIVER: ", ConfigApps.DBDriver, true)
 	}
