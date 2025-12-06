@@ -24,6 +24,9 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	ws.GlobalHub = ws.NewHub()
 	go ws.GlobalHub.Run()
 
+	// Set GlobalDB for WebSocket handlers
+	GlobalDB = db
+
 	auth := app.Group("/auth")
 
 	// Public routes
@@ -48,6 +51,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Post("/execute-flow", func(c *fiber.Ctx) error { return ExecuteFlowHandler(c, db) })
 		admin.Post("/down-template", func(c *fiber.Ctx) error { return DownTemplateHandler(c, db) })
 		admin.Post("/execute-table-operation", func(c *fiber.Ctx) error { return ExecuteTableOperationHandler(c, db) })
+		admin.Post("/ai/command", func(c *fiber.Ctx) error { return AiCommandHandler(c, db) })
 		admin.Post("/plugins/upload", func(c *fiber.Ctx) error {
 			return dbgenerator.HandlePluginUpload(c, db)
 		})
@@ -56,6 +60,10 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Get("/notifications/unread", func(c *fiber.Ctx) error { return GetUnreadNotifications(c, db) })
 		admin.Post("/notifications/:id/read", func(c *fiber.Ctx) error { return MarkAsRead(c, db) })
 		admin.Post("/notifications/send", func(c *fiber.Ctx) error { return SendNotification(c, db) })
+
+		// Chat Routes
+		admin.Get("/users/list", func(c *fiber.Ctx) error { return GetUserListHandler(c, db) })
+		admin.Get("/chat/history", func(c *fiber.Ctx) error { return GetChatHistoryHandler(c, db) })
 	}
 
 	app.Get("/ws/notifications",

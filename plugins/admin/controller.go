@@ -215,43 +215,61 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 
 	if !strings.Contains(flowName, "searchcombotheme") {
 		IsPermission, err := CheckUserPermission(c, db, menuName, PermRead)
-		if err != nil || !IsPermission {
+		if err != nil {
 			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
+		if !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", "User does not have read permission")
 		}
 	}
 
 	if strings.Contains(flowName, "modif") {
 		IsPermission, err := CheckUserPermission(c, db, menuName, PermWrite)
-		if err != nil || !IsPermission {
+		if err != nil {
 			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
+		if !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", "User does not have write permission")
 		}
 	}
 
 	if strings.Contains(flowName, "purge") {
 		IsPermission, err := CheckUserPermission(c, db, menuName, PermPurge)
-		if err != nil || !IsPermission {
+		if err != nil {
 			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
+		if !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", "User does not have purge permission")
 		}
 	}
 
 	if strings.Contains(flowName, "approve") {
 		IsPermission, err := CheckUserPermission(c, db, menuName, PermPost)
-		if err != nil || !IsPermission {
+		if err != nil {
 			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
+		if !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", "User does not have post permission")
 		}
 	}
 
 	if strings.Contains(flowName, "reject") {
 		IsPermission, err := CheckUserPermission(c, db, menuName, PermReject)
-		if err != nil || !IsPermission {
+		if err != nil {
 			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
+		if !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", "User does not have reject permission")
 		}
 	}
 
 	if strings.Contains(flowName, "down") {
 		IsPermission, err := CheckUserPermission(c, db, menuName, PermDownload)
-		if err != nil || !IsPermission {
+		if err != nil {
 			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", err.Error())
+		}
+		if !IsPermission {
+			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_AUTHORIZE", "User does not have download permission")
 		}
 	}
 
@@ -465,4 +483,24 @@ func ExecuteTableOperationHandler(c *fiber.Ctx, db *gorm.DB) error {
 		"table":     tableDef.Table.Name,
 		"results":   executionResults,
 	})
+}
+
+func GetUserListHandler(c *fiber.Ctx, db *gorm.DB) error {
+	userID := c.Locals("userid")
+	if userID == nil {
+		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
+	}
+
+	var users []models.Useraccess
+	// Fetch all users including self for testing
+	err := db.Select("useraccessid, username, realname, email, userphoto, isonline").
+		Where("recordstatus = 1 and isonline = 1 and useraccessid != ?", userID).
+		Order("isonline DESC, realname ASC").
+		Find(&users).Error
+
+	if err != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "DB_ERROR", err.Error())
+	}
+
+	return helpers.SuccessResponse(c, "DATA_RETRIEVED", users)
 }
