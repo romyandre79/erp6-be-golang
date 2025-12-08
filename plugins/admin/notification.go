@@ -34,6 +34,8 @@ func WebSocketHandler(c *websocket.Conn) {
 	info := &ws.RegisterInfo{UserID: useraccessid, Conn: c}
 	ws.GlobalHub.Register <- info
 
+	// Status updates handled by Hub callbacks
+
 	defer func() {
 		ws.GlobalHub.Unregister <- info
 		c.Close()

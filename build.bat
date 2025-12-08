@@ -1,0 +1,1 @@
+powershell -ExecutionPolicy Bypass -File build-all.ps1  
