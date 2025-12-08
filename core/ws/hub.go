@@ -10,11 +10,13 @@ import (
 type Hub struct {
 	// Registered clients needed to send to specific user
 	// Map Link UserAccessID -> []Connections (One user might have multiple tabs)
-	Clients    map[int][]*websocket.Conn
-	Register   chan *RegisterInfo
-	Unregister chan *RegisterInfo
-	Broadcast  chan []byte
-	mutex      sync.Mutex
+	Clients       map[int][]*websocket.Conn
+	Register      chan *RegisterInfo
+	Unregister    chan *RegisterInfo
+	Broadcast     chan []byte
+	mutex         sync.Mutex
+	OnUserOnline  func(userID int)
+	OnUserOffline func(userID int)
 }
 
 type RegisterInfo struct {
@@ -40,6 +42,11 @@ func (h *Hub) Run() {
 				h.Clients[reg.UserID] = []*websocket.Conn{}
 			}
 			h.Clients[reg.UserID] = append(h.Clients[reg.UserID], reg.Conn)
+
+			// If this is the first connection, trigger Online
+			if len(h.Clients[reg.UserID]) == 1 && h.OnUserOnline != nil {
+				go h.OnUserOnline(reg.UserID)
+			}
 			h.mutex.Unlock()
 
 		case unreg := <-h.Unregister:
@@ -53,6 +60,19 @@ func (h *Hub) Run() {
 				}
 				if len(h.Clients[unreg.UserID]) == 0 {
 					delete(h.Clients, unreg.UserID)
+					// If no more connections, trigger Offline
+					if h.OnUserOffline != nil {
+						go h.OnUserOffline(unreg.UserID)
+					}
+				}
+			}
+			h.mutex.Unlock()
+
+		case msg := <-h.Broadcast:
+			h.mutex.Lock()
+			for _, conns := range h.Clients {
+				for _, conn := range conns {
+					conn.WriteMessage(websocket.TextMessage, msg)
 				}
 			}
 			h.mutex.Unlock()

@@ -21,7 +21,7 @@ func main() {
 		}
 		if d.IsDir() && path != "plugins" {
 			name := filepath.Base(path)
-			imports = append(imports, fmt.Sprintf("_ \"erp6-be-golang/plugins/%s\"", name))
+			imports = append(imports, fmt.Sprintf("_ \"erp6-be-golang/plugins/%s", name))
 		}
 		return nil
 	})

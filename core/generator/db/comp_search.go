@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/log"
 	"gorm.io/gorm"
 )
 
@@ -39,6 +40,7 @@ type SearchParams struct {
 }
 
 func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr string, userId interface{}) string {
+	driver := GetDatabaseDriver(db)
 	whereStat := ""
 	wheres := strings.Fields(compValue)
 	for _, data := range wheres {
@@ -67,6 +69,35 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 					whereStat += fmt.Sprintf("%s in (%s)", field, userObject)
 				case "userid":
 					whereStat += fmt.Sprintf("%s = %v", field, userId)
+				}
+			} else if strings.Contains(data, "!=") {
+				datas := strings.SplitN(data, "!=", 2)
+				left := datas[0]
+				right := datas[1]
+
+				if strings.Contains(right, "$") {
+					key := strings.ReplaceAll(right, "$", "")
+					val := c.Query(key)
+					if val == "" {
+						val = c.FormValue(key)
+					}
+					switch driver {
+					case "mysql", "mariadb":
+						whereStat += fmt.Sprintf("(COALESCE(%s,'') <> '%s') ", left, val)
+					default:
+						whereStat += fmt.Sprintf("(COALESCE(%s,'') != '%s') ", left, val)
+					}
+				} else {
+					if strings.Contains(data, "empty") {
+						whereStat += fmt.Sprintf("%s is not null ", left)
+					} else {
+						switch driver {
+						case "mysql", "mariadb":
+							whereStat += fmt.Sprintf("(COALESCE(%s,'') <> '%s') ", left, right)
+						default:
+							whereStat += fmt.Sprintf("(COALESCE(%s,'') != '%s') ", left, right)
+						}
+					}
 				}
 			} else if strings.Contains(data, "=") {
 				datas := strings.SplitN(data, "=", 2)
@@ -236,6 +267,7 @@ func parseSearchParams(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB,
 			}
 		}
 	}
+	log.Info(sp.Enable)
 	return sp
 }
 
@@ -326,6 +358,8 @@ func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.D
 			}
 		}
 
+		log.Info(sqlState)
+
 		if sp.Enable {
 			if isSingle {
 				var singleResult string
@@ -343,7 +377,7 @@ func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.D
 				if rowResult != nil {
 					resultStat["data"] = rowResult
 				} else {
-					helpers.FailResponse(c, 401, "INVALID DATA RETRIEVED", "")
+					helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA RETRIEVED", "")
 					return nil
 				}
 			} else {

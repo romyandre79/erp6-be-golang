@@ -2,7 +2,9 @@
 package admin
 
 import (
+	"encoding/json"
 	dbgenerator "erp6-be-golang/core/generator/db"
+	"erp6-be-golang/models"
 
 	"erp6-be-golang/core/ws"
 
@@ -24,10 +26,32 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	ws.GlobalHub = ws.NewHub()
 	go ws.GlobalHub.Run()
 
+	// Implement Hub Callbacks
+	ws.GlobalHub.OnUserOnline = func(userID int) {
+		db.Model(&models.Useraccess{}).Where("useraccessid = ?", userID).Update("isonline", 1)
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":     "status_update",
+			"user_id":  userID,
+			"isonline": 1,
+		})
+		ws.GlobalHub.Broadcast <- msg
+	}
+
+	ws.GlobalHub.OnUserOffline = func(userID int) {
+		db.Model(&models.Useraccess{}).Where("useraccessid = ?", userID).Update("isonline", 0)
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":     "status_update",
+			"user_id":  userID,
+			"isonline": 0,
+		})
+		ws.GlobalHub.Broadcast <- msg
+	}
+
 	// Set GlobalDB for WebSocket handlers
 	GlobalDB = db
 
-	auth := app.Group("/auth")
+	// Public routes
+	auth := app.Group("/api/auth")
 
 	// Public routes
 	auth.Post("/login", func(c *fiber.Ctx) error { return LoginHandler(c, db) })
@@ -41,7 +65,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		auth.Get("/me", func(c *fiber.Ctx) error { return MeHander(c, db) })
 	}
 
-	admin := app.Group("/admin")
+	admin := app.Group("/api/admin")
 	admin.Use(AuthMiddleware)
 	{
 		admin.Get("/getmenu", func(c *fiber.Ctx) error { return MenuSingleNameHandler(c, db) })
@@ -63,10 +87,16 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 
 		// Chat Routes
 		admin.Get("/users/list", func(c *fiber.Ctx) error { return GetUserListHandler(c, db) })
+		// Chat Routes
+		admin.Get("/users/list", func(c *fiber.Ctx) error { return GetUserListHandler(c, db) })
 		admin.Get("/chat/history", func(c *fiber.Ctx) error { return GetChatHistoryHandler(c, db) })
+
+		// DB Backup/Restore
+		admin.Post("/db/backup", func(c *fiber.Ctx) error { return BackupHandler(c, db) })
+		admin.Post("/db/restore", func(c *fiber.Ctx) error { return RestoreHandler(c, db) })
 	}
 
-	app.Get("/ws/notifications",
+	app.Get("/api/ws/notifications",
 		AuthMiddleware, // ✅ Auth first
 		func(c *fiber.Ctx) error { // ✅ Then check WS upgrade
 			if websocket.IsWebSocketUpgrade(c) {
@@ -78,7 +108,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		websocket.New(WebSocketHandler),
 	)
 
-	media := app.Group("/media")
+	media := app.Group("/api/media")
 	media.Use(AuthMiddleware)
 	{
 		media.Get("/", ListMedia)

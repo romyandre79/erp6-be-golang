@@ -3,14 +3,17 @@ package main
 import (
 	"erp6-be-golang/core/cache"
 	"erp6-be-golang/core/configs"
+	generator "erp6-be-golang/core/generator/db"
 	"erp6-be-golang/core/scheduler"
 
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/core/i18n"
 	"erp6-be-golang/core/logger"
 	"erp6-be-golang/core/plugin"
+	"flag"
 	"log"
 	"strconv"
+	"strings"
 
 	_ "erp6-be-golang/plugins/admin"
 
@@ -26,11 +29,57 @@ import (
 // @host localhost:8888
 // @BasePath /
 func main() {
+	// CLI Flags
+	backupPtr := flag.Bool("backup", false, "Backup database to file (default: backup.sql or backup.db)")
+	restorePtr := flag.String("restore", "", "Restore database from file")
+	flag.Parse()
+
 	i18n.Init()
 
 	// Load Config from .env
 	log.Print("Check Configuration ... ")
 	configs.LoadConfig()
+
+	// Handle CLI Operations
+	if *backupPtr {
+		log.Println("Starting Database Backup...")
+		outFile := "backup.sql"
+		if configs.ConfigApps.DBDriver == "sqlite" || configs.ConfigApps.DBDriver == "sqlite3" {
+			outFile = "backup.db"
+		}
+		err := generator.BackupDatabase(
+			configs.ConfigApps.DBDriver,
+			configs.ConfigApps.DBHost,
+			configs.ConfigApps.DBPort,
+			configs.ConfigApps.DBUser,
+			configs.ConfigApps.DBPass,
+			configs.ConfigApps.DBName,
+			outFile,
+		)
+		if err != nil {
+			log.Fatalf("Backup failed: %v", err)
+		}
+		log.Printf("Backup successful! File saved to: %s", outFile)
+		return
+	}
+
+	if *restorePtr != "" {
+		log.Printf("Starting Database Restore from %s...", *restorePtr)
+		err := generator.RestoreDatabase(
+			configs.ConfigApps.DBDriver,
+			configs.ConfigApps.DBHost,
+			configs.ConfigApps.DBPort,
+			configs.ConfigApps.DBUser,
+			configs.ConfigApps.DBPass,
+			configs.ConfigApps.DBName,
+			*restorePtr,
+		)
+		if err != nil {
+			log.Fatalf("Restore failed: %v", err)
+		}
+		log.Println("Restore successful!")
+		return
+	}
 
 	// Load Logger from .env
 	_, err := logger.InitLogger()
@@ -95,7 +144,22 @@ func main() {
 	plugin.LoadActivePlugins(db, app)
 	log.Print("End Load Plugin ...")
 
+	log.Print("Load Workflow Components ...")
+	generator.LoadPlugins(db)
+	log.Print("End Load Workflow Components ...")
+
+	app.All("/api/webhook/:source", plugin.WebhookHandler)
+
 	app.Static("/", "./public")
+
+	// Catch-all route for SPA (must be last)
+	app.Get("*", func(c *fiber.Ctx) error {
+		// Only serve index.html for non-API routes
+		if strings.HasPrefix(c.Path(), "/api/") {
+			return c.SendStatus(fiber.StatusNotFound)
+		}
+		return c.SendFile("./public/index.html")
+	})
 
 	// Init Scheduler (after App creation)
 	scheduler.Init(app)

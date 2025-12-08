@@ -53,7 +53,9 @@ var ConfigApps *Config
 
 func LoadConfig() {
 	if err := godotenv.Load(); err != nil {
-		panic("No .env file found, using system env")
+		// Just log error, don't panic. The system might be using real env vars.
+		// panic("No .env file found, using system env")
+		helpers.IsError(err, "No .env file found, using system env or defaults", false)
 	}
 
 	ConfigApps = &Config{
@@ -95,7 +97,7 @@ func LoadConfig() {
 		ReportPass:            getEnv("REPORT_PASS", ""),
 		ReportTime:            getEnv("REPORT_TIME", ""),
 		WriteBufferSize:       getEnv("WRITE_BUFFER_SIZE", ""),
-		ExternalComponentPath: getEnv("EXTERNAL_COMPONENT_PATH", "./temp_external_components"),
+		ExternalComponentPath: getEnv("EXTERNAL_COMPONENT_PATH", "./public/plugins"),
 	}
 
 	// check .env details
