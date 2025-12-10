@@ -2,6 +2,7 @@ package generator
 
 import (
 	"encoding/json"
+	"erp6-be-golang/core/ws"
 	"erp6-be-golang/models"
 	"errors"
 	"fmt"
@@ -243,6 +244,9 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 	component.IsRun = true
 	fmt.Printf("Running workflowid: %d component: %s (ID: %d)\n", workflowId, component.Name, component.ID)
 
+	// Broadcast node start via WebSocket
+	broadcastNodeUpdate(c, "node_start", workflowId, nodeId, component.Name, nil, nil, 0, "")
+
 	// Start timing
 	startTime := time.Now()
 
@@ -377,6 +381,50 @@ func appendStepResult(c *fiber.Ctx, workflowId int, nodeId int, componentName st
 		Error:         errMsg,
 	})
 	c.Locals("wfEngine", wfEngine)
+
+	// Broadcast node completion via WebSocket
+	eventType := "node_complete"
+	if !success {
+		eventType = "node_error"
+	}
+	broadcastNodeUpdate(c, eventType, workflowId, nodeId, componentName, input, result, execTime, errMsg)
+}
+
+// broadcastNodeUpdate sends workflow node updates via WebSocket
+func broadcastNodeUpdate(c *fiber.Ctx, eventType string, workflowId int, nodeId int, componentName string, input any, result any, execTime float64, errMsg string) {
+	if ws.GlobalHub == nil {
+		return
+	}
+
+	// Get user ID from context
+	userID, ok := c.Locals("userid").(int)
+	if !ok {
+		return
+	}
+
+	payload := map[string]interface{}{
+		"type":          "workflow_test",
+		"event":         eventType,
+		"workflowId":    workflowId,
+		"nodeId":        nodeId,
+		"componentName": componentName,
+		"timestamp":     time.Now().Format(time.RFC3339),
+	}
+
+	if eventType != "node_start" {
+		payload["input"] = input
+		payload["result"] = result
+		payload["executionTime"] = execTime
+		payload["success"] = errMsg == ""
+		if errMsg != "" {
+			payload["error"] = errMsg
+		}
+	}
+
+	message, err := json.Marshal(payload)
+	if err == nil {
+		ws.GlobalHub.SendToUser(userID, message)
+	}
 }
 
 func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error {

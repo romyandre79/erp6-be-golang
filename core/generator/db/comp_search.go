@@ -151,7 +151,19 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 				// Default → LIKE
 				if strings.Contains(data, ".") {
 					funcs := strings.Split(data, ".")
-					whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, GetSearchText(c, []string{"POST"}, funcs[1], "", "string"))
+					val := GetSearchText(c, []string{"POST"}, funcs[1], "", "string")
+
+					if strings.HasSuffix(strings.ToLower(funcs[1]), "id") {
+						// Strip wildcards for ID exact match
+						cleanVal := strings.ReplaceAll(val, "%", "")
+						if cleanVal == "" {
+						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, val)
+						} else {
+						whereStat += fmt.Sprintf("(%s = '%s') ", data, cleanVal)
+						}
+					} else {
+						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, val)
+					}
 				} else {
 					whereStat += " " + data + " "
 				}
