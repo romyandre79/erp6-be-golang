@@ -4,6 +4,7 @@ go 1.25.1
 
 require (
 	github.com/dgraph-io/badger/v4 v4.8.0
+	github.com/godoes/gorm-oracle v1.6.18
 	github.com/gofiber/contrib/websocket v1.3.4
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/joho/godotenv v1.5.1
@@ -28,7 +29,6 @@ require (
 	github.com/fasthttp/websocket v1.5.8 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/godoes/gorm-oracle v1.6.18 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/flatbuffers v25.9.23+incompatible // indirect
 	github.com/mattn/go-sqlite3 v1.14.22 // indirect

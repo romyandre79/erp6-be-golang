@@ -73,8 +73,21 @@ func handleDecision(ctx *WorkflowContext) error {
 	case "node result", "noderesult":
 		if len(wfEngine) > 0 {
 			// Get the last node result
-			if resultStr, ok := wfEngine[len(wfEngine)-1].ResultNode.(string); ok {
+			lastResult := wfEngine[len(wfEngine)-1].ResultNode
+
+			// Try as string first
+			if resultStr, ok := lastResult.(string); ok {
 				actualValue = resultStr
+			} else if resultMap, ok := lastResult.(map[string]interface{}); ok {
+				// Try to extract the key from the map
+				if val, exists := resultMap[key]; exists {
+					// Convert value to string
+					if strVal, ok := val.(string); ok {
+						actualValue = strVal
+					} else {
+						actualValue = fmt.Sprintf("%v", val)
+					}
+				}
 			}
 		}
 

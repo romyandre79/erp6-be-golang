@@ -80,6 +80,23 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 			return dbgenerator.HandlePluginUpload(c, db)
 		})
 
+		// Module Management Routes
+		admin.Post("/module/upload", func(c *fiber.Ctx) error {
+			return UploadModulePackageHandler(c, db)
+		})
+		admin.Post("/module/uninstall/:moduleid", func(c *fiber.Ctx) error {
+			return UninstallModuleHandler(c, db)
+		})
+		admin.Get("/module/details/:moduleid", func(c *fiber.Ctx) error {
+			return GetModuleDetailsHandler(c, db)
+		})
+		admin.Get("/module/dependencies/:moduleid", func(c *fiber.Ctx) error {
+			return GetModuleDependenciesHandler(c, db)
+		})
+		admin.Get("/module/export/:moduleid", func(c *fiber.Ctx) error {
+			return ExportModuleHandler(c, db)
+		})
+
 		// Notification Routes
 		admin.Get("/notifications/unread", func(c *fiber.Ctx) error { return GetUnreadNotifications(c, db) })
 		admin.Post("/notifications/:id/read", func(c *fiber.Ctx) error { return MarkAsRead(c, db) })
@@ -94,6 +111,9 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		// DB Backup/Restore
 		admin.Post("/db/backup", func(c *fiber.Ctx) error { return BackupHandler(c, db) })
 		admin.Post("/db/restore", func(c *fiber.Ctx) error { return RestoreHandler(c, db) })
+
+		// DB Reverse Engineering
+		admin.Post("/db/reverse-engineer", func(c *fiber.Ctx) error { return ReverseEngineerHandler(c, db) })
 	}
 
 	app.Get("/api/ws/notifications",
