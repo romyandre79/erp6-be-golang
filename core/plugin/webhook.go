@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"erp6-be-golang/core/configs"
+	generator "erp6-be-golang/core/generator/db"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"gorm.io/gorm"
 )
 
 type WebhookInput struct {
@@ -28,42 +30,48 @@ type ComponentOutput struct {
 	Error  string      `json:"error"`
 }
 
-func WebhookHandler(c *fiber.Ctx) error {
+// Update usage
+func WebhookHandler(c *fiber.Ctx, db *gorm.DB) error {
 	source := c.Params("source")
 	if source == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Source is required"})
 	}
 
-	// Validate source against external components
-	// We assume external components are folders in ExternalComponentPath
-	componentName := strings.ToLower(source)
-	// Some sources might map to a component name differently, but standard convention component_name == source
-
-	// We check if the binary exists
-	// Convention: ExternalComponentPath/{componentName}/{componentName}.exe (windows) or just {componentName}
-	// Let's assume binary name matches component name
-
+	// 1. Try External Component
 	extPath := configs.ConfigApps.ExternalComponentPath
 	if extPath == "" {
 		extPath = "./temp_external_components"
 	}
-
-	binaryPath := filepath.Join(extPath, componentName, componentName+".exe") // Assuming Windows environment as per user instructions
-	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-		// Try without .exe
+	componentName := strings.ToLower(source)
+	binaryPath := filepath.Join(extPath, componentName, componentName+".exe")
+	if _, err := os.Stat(binaryPath); err != nil {
 		binaryPath = filepath.Join(extPath, componentName, componentName)
-		if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
-			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": fmt.Sprintf("Component %s not found", componentName)})
-		}
 	}
 
-	// Prepare Input for Component
-	// We need to pass the request details to the component so it can "recognize" and "handle" it.
-	// Common input structure for components seems to be `{"params": [...]}`
-	// We will map request details into params.
+	// If binary exists, execute external logic
+	if _, err := os.Stat(binaryPath); err == nil {
+		return executeExternalComponent(c, binaryPath)
+	}
 
+	// 2. Try Internal Workflow
+	// Verify if workflow exists first or just let ExecuteFlow handle it?
+	// ExecuteFlow returns error if workflow invalid.
+	if err := generator.ExecuteFlow(c, db, source, false); err != nil {
+		if strings.Contains(err.Error(), "does not exist") {
+			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": fmt.Sprintf("Source '%s' not found (checked plugins and workflows)", source)})
+		}
+		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	// If flow executed but didn't write response (body empty), return generic OK
+	if len(c.Response().Body()) == 0 {
+		return c.JSON(fiber.Map{"status": "ok", "message": "Workflow executed"})
+	}
+	return nil
+}
+
+func executeExternalComponent(c *fiber.Ctx, binaryPath string) error {
 	body := c.Body()
-	// headers := c.GetReqHeaders() // Fiber v2
 	headers := c.GetReqHeaders()
 	headerBytes, _ := json.Marshal(headers)
 
@@ -96,14 +104,12 @@ func WebhookHandler(c *fiber.Ctx) error {
 
 	err = cmd.Run()
 	if err != nil {
-		// Try to capture stderr if available or return generic error
 		return c.Status(http.StatusInternalServerError).JSON(fiber.Map{"error": fmt.Sprintf("Failed to execute component: %v", err)})
 	}
 
 	// Parse Output
 	var output ComponentOutput
 	if err := json.Unmarshal(out.Bytes(), &output); err != nil {
-		// If output is not JSON, return as string
 		return c.Status(http.StatusOK).Send(out.Bytes())
 	}
 

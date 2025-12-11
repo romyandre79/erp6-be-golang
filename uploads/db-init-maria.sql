@@ -553,7 +553,8 @@ INSERT INTO `component` (`componentid`, `componentname`, `componenttitle`, `comp
   (14, 'SearchSingle', 'Search Single Column', 3, 'fas fa-search', 'Prisma Data Abadi', '1.0.0', 1, 1),
   (15, 'SearchRow', 'Search a Row', 3, 'fas fa-search', 'Prisma Data Abadi', '1.0.0', 1, 1),
   (16, 'Chat', 'Real-time Chat', 5, 'fa-solid fa-headset', 'Prisma Data Abadi', '0.0.1', 1, 1),
-  (17, 'AIAssistant', 'AI Assistant', 5, 'fa-solid fa-spray-can-sparkles', 'Prisma Data Abadi', '0.0.7', 1, 1);
+  (17, 'AIAssistant', 'AI Assistant', 5, 'fa-solid fa-spray-can-sparkles', 'Prisma Data Abadi', '0.0.7', 1, 1),
+  (18, 'Webhook', 'Webhook Trigger', 7, 'fa-solid fa-satellite-dish', 'Prisma Data Abadi', '1.0.0', 0, 1);
 
 -- Dumping structure for table capella.componentcategory
 DROP TABLE IF EXISTS `componentcategory`;
