@@ -133,8 +133,13 @@ func main() {
 		WriteBufferSize:   WriteBufferSize,
 	})
 
+	allowedOrigins := strings.Split(configs.ConfigApps.AllowOrigin, ",")
+	for i := range allowedOrigins {
+		allowedOrigins[i] = strings.TrimSpace(allowedOrigins[i])
+	}
+
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     configs.ConfigApps.AllowOrigin, // URL Nuxt
+		AllowOrigins:     strings.Join(allowedOrigins, ","),
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 		AllowCredentials: true,
@@ -148,7 +153,9 @@ func main() {
 	generator.LoadPlugins(db)
 	log.Print("End Load Workflow Components ...")
 
-	app.All("/api/webhook/:source", plugin.WebhookHandler)
+	app.All("/api/webhook/:source", func(c *fiber.Ctx) error {
+		return plugin.WebhookHandler(c, db)
+	})
 
 	app.Static("/", "./public")
 
@@ -163,10 +170,6 @@ func main() {
 
 	// Init Scheduler (after App creation)
 	scheduler.Init(app)
-	// Example handler
-	scheduler.RegisterHandler("test_job", func() {
-		log.Println("Hello from test_job!")
-	})
 	scheduler.LoadJobs(db)
 
 	app.Listen(":" + configs.ConfigApps.AppPort)

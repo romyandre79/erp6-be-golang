@@ -114,6 +114,9 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 
 		// DB Reverse Engineering
 		admin.Post("/db/reverse-engineer", func(c *fiber.Ctx) error { return ReverseEngineerHandler(c, db) })
+
+		// Scheduler Management
+		admin.Post("/scheduler/reload", func(c *fiber.Ctx) error { return ReloadSchedulerHandler(c, db) })
 	}
 
 	app.Get("/api/ws/notifications",
