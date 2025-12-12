@@ -105,6 +105,15 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 	// Debug logging
 	fmt.Printf("[SendMessage] Extracted values: sendTo=%d, message='%s', title='%s', type='%s'\n", sendTo, message, title, messageType)
 
+	// Replace template variables in message
+	if commandOutput := c.Locals("commandOutput"); commandOutput != nil {
+		if outputStr, ok := commandOutput.(string); ok {
+			message = strings.ReplaceAll(message, "{{commandOutput}}", outputStr)
+			title = strings.ReplaceAll(title, "{{commandOutput}}", outputStr)
+			fmt.Printf("[SendMessage] Replaced {{commandOutput}} template variable\n")
+		}
+	}
+
 	// Validate required parameters
 	if sendTo == 0 {
 		return helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_PARAMETER", "sendto is required")

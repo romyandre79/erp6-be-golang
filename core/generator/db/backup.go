@@ -18,7 +18,6 @@ func BackupDatabase(driver, host, port, user, pass, name, outputFile string) err
 	case "mysql", "mariadb":
 		// mysqldump -u[user] -p[pass] -h[host] -P[port] [dbname] > [outputFile]
 		cmd := exec.Command("mysqldump",
-			"--column-statistics=0",
 			fmt.Sprintf("-u%s", user),
 			fmt.Sprintf("-p%s", pass),
 			fmt.Sprintf("-h%s", host),

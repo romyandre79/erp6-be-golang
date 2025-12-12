@@ -115,6 +115,28 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		// DB Reverse Engineering
 		admin.Post("/db/reverse-engineer", func(c *fiber.Ctx) error { return ReverseEngineerHandler(c, db) })
 
+		// DB Resources (Relations & Areas)
+		admin.Post("/db/relations/save", func(c *fiber.Ctx) error { return SaveRelationsHandler(c, db) })
+		admin.Get("/db/relations", func(c *fiber.Ctx) error { return GetRelationsHandler(c, db) })
+		admin.Delete("/db/relations/:id", func(c *fiber.Ctx) error { return DeleteRelationHandler(c, db) })
+
+		admin.Post("/db/areas/save", func(c *fiber.Ctx) error { return SaveAreasHandler(c, db) })
+		admin.Get("/db/areas", func(c *fiber.Ctx) error { return GetAreasHandler(c, db) })
+		admin.Delete("/db/areas/:id", func(c *fiber.Ctx) error { return DeleteAreaHandler(c, db) })
+
+		// Report Designer Routes
+		admin.Post("/report-templates", func(c *fiber.Ctx) error { return CreateReportTemplate(c, db) })
+		admin.Get("/report-templates", func(c *fiber.Ctx) error { return ListReportTemplates(c, db) })
+		admin.Get("/report-templates/:id", func(c *fiber.Ctx) error { return GetReportTemplate(c, db) })
+		admin.Put("/report-templates/:id", func(c *fiber.Ctx) error { return UpdateReportTemplate(c, db) })
+		admin.Delete("/report-templates/:id", func(c *fiber.Ctx) error { return DeleteReportTemplate(c, db) })
+		admin.Post("/report-templates/:id/preview", func(c *fiber.Ctx) error { return PreviewReport(c, db) })
+		admin.Post("/report-templates/:id/execute", func(c *fiber.Ctx) error { return ExecuteReport(c, db) })
+
+		// JRXML Import/Export Routes
+		admin.Post("/report-templates/import-jrxml", func(c *fiber.Ctx) error { return ImportJRXML(c, db) })
+		admin.Get("/report-templates/:id/export-jrxml", func(c *fiber.Ctx) error { return ExportJRXML(c, db) })
+
 		// Scheduler Management
 		admin.Post("/scheduler/reload", func(c *fiber.Ctx) error { return ReloadSchedulerHandler(c, db) })
 	}
