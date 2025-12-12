@@ -10,6 +10,7 @@ import (
 type Config struct {
 	AppName               string
 	AppEnv                string
+	AppHost                string
 	AppPort               string
 	AllowOrigin           string
 	ReadBufferSize        string
@@ -61,6 +62,7 @@ func LoadConfig() {
 	ConfigApps = &Config{
 		AppName:               getEnv("APP_NAME", ""),
 		AppEnv:                getEnv("APP_ENV", ""),
+		AppHost:                getEnv("APP_HOST", ""),
 		AppPort:               getEnv("APP_PORT", ""),
 		AllowOrigin:           getEnv("ALLOW_ORIGIN", ""),
 		BodyLimit:             getEnv("BODY_LIMIT", ""),
@@ -102,6 +104,7 @@ func LoadConfig() {
 
 	// check .env details
 	helpers.IsEmptyLog(ConfigApps.AppName, "APP_NAME", true)
+	helpers.IsEmptyLog(ConfigApps.AppHost, "APP_HOST", true)
 	helpers.IsEmptyLog(ConfigApps.AppEnv, "APP_ENV", true)
 	helpers.IsEmptyLog(ConfigApps.AppPort, "APP_PORT", true)
 	helpers.IsEmptyLog(ConfigApps.AppPort, "ALLOW_ORIGIN", true)

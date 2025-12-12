@@ -172,5 +172,5 @@ func main() {
 	scheduler.Init(app)
 	scheduler.LoadJobs(db)
 
-	app.Listen(":" + configs.ConfigApps.AppPort)
+	app.Listen(configs.ConfigApps.AppHost + ":" + configs.ConfigApps.AppPort)
 }

@@ -359,12 +359,15 @@ func ReverseEngineerDatabase(db *gorm.DB) ([]ReverseEngineeredTable, error) {
 		return nil, err
 	}
 
+	fmt.Printf("DEBUG: Found %d tables in database: %v\n", len(tableNames), tableNames)
+
 	var tables []ReverseEngineeredTable
 
 	for _, tableName := range tableNames {
 		// Skip system tables
 		if strings.HasPrefix(strings.ToLower(tableName), "sys") ||
 			strings.HasPrefix(strings.ToLower(tableName), "information_schema") {
+			fmt.Printf("DEBUG: Skipping system table: %s\n", tableName)
 			continue
 		}
 
@@ -377,6 +380,7 @@ func ReverseEngineerDatabase(db *gorm.DB) ([]ReverseEngineeredTable, error) {
 		tables = append(tables, *table)
 	}
 
+	fmt.Printf("DEBUG: Automatically processed %d tables\n", len(tables))
 	return tables, nil
 }
 
