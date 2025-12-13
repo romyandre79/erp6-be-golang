@@ -45,18 +45,20 @@ func handleDecision(ctx *WorkflowContext) error {
 		}
 	}
 
-	// Validate decision content format
-	if !strings.Contains(contentDecision, "=") {
+	// Parse decision content
+	operator := "="
+	if strings.Contains(contentDecision, "!=") {
+		operator = "!="
+	} else if !strings.Contains(contentDecision, "=") {
 		if enableDecision {
 			return helpers.FailResponse(ctx.FiberCtx, fiber.StatusBadRequest,
-				"INVALID_DECISION_FORMAT", "Decision format must be 'key=value'")
+				"INVALID_DECISION_FORMAT", "Decision format must be 'key=value' or 'key!=value'")
 		}
 		ctx.DecisionResult = false
 		return nil
 	}
 
-	// Parse decision content
-	data := strings.SplitN(contentDecision, "=", 2)
+	data := strings.SplitN(contentDecision, operator, 2)
 	key := strings.TrimSpace(data[0])
 	expected := strings.TrimSpace(data[1])
 
@@ -84,8 +86,12 @@ func handleDecision(ctx *WorkflowContext) error {
 					// Convert value to string
 					if strVal, ok := val.(string); ok {
 						actualValue = strVal
-					} else {
-						actualValue = fmt.Sprintf("%v", val)
+					} else { // Handle nil or other types
+						if val == nil {
+							actualValue = "" // explicit empty for nil
+						} else {
+							actualValue = fmt.Sprintf("%v", val)
+						}
 					}
 				}
 			}
@@ -101,11 +107,24 @@ func handleDecision(ctx *WorkflowContext) error {
 		return nil
 	}
 
+	// Debug logging
+	fmt.Printf("[Decision] Condition: %s, Key: %s, Expected: %s, Actual: '%s'\n", 
+		contentDecision, key, expected, actualValue)
+
 	// Evaluate decision
+	match := false
 	if strings.ToLower(expected) == "empty" {
-		ctx.DecisionResult = (actualValue == "")
+		match = (actualValue == "")
 	} else {
-		ctx.DecisionResult = (actualValue == expected)
+		match = (actualValue == expected)
 	}
+
+	if operator == "!=" {
+		ctx.DecisionResult = !match
+	} else {
+		ctx.DecisionResult = match
+	}
+
+	fmt.Printf("[Decision] Result: %v (match=%v, operator=%s)\n", ctx.DecisionResult, match, operator)
 	return nil
 }

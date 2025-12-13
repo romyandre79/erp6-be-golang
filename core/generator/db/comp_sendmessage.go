@@ -6,8 +6,10 @@ import (
 	"erp6-be-golang/core/ws"
 	"erp6-be-golang/models"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"gorm.io/gorm"
@@ -36,7 +38,7 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 
 	// Extract parameters from workflow
 	for _, p := range params {
-		val := strings.TrimSpace(p.CompValue)
+		val := strings.TrimSpace(ResolveParam(c, p.CompValue))
 		switch strings.ToLower(p.InputName) {
 		case "sendtonotif", "user_id":
 			// Try to parse as int
@@ -125,28 +127,57 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 	// Handle based on message type
 	if messageType == "chat" {
 		// For chat messages, just send via WebSocket without saving to DB
-		// Also extract conversation_state from previous node if available
+		// Also extract conversation_state and execute flag from previous node if available
 		var conversationState string
+		var executeFlag string
 		if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok && len(wfEngine) > 0 {
 			lastResult := wfEngine[len(wfEngine)-1]
 			if lastResult.ResultNode != nil {
 				if resultMap, ok := lastResult.ResultNode.(map[string]interface{}); ok {
 					if state, ok := resultMap["conversation_state"].(string); ok {
 						conversationState = state
+						
+						// Save conversation state to file for next message
+						if userID, ok := c.Locals("userid").(int); ok && userID > 0 {
+							conversationDir := "./tmp/ai_conversations"
+							os.MkdirAll(conversationDir, 0755)
+							conversationFile := fmt.Sprintf("%s/%d.json", conversationDir, userID)
+							stateData := map[string]interface{}{
+								"conversation_state": conversationState,
+								"updated_at":         time.Now().Format(time.RFC3339),
+							}
+							if data, err := json.Marshal(stateData); err == nil {
+								os.WriteFile(conversationFile, data, 0644)
+								fmt.Printf("[SendMessage] Saved conversation state for user %d\n", userID)
+							}
+						}
+					}
+					
+					// Check execute flag
+					if exec, ok := resultMap["execute"].(string); ok {
+						executeFlag = exec
 					}
 				}
 			}
 		}
+		
+		// Modify message if workflow is executing
+		displayMessage := message
+		if executeFlag == "true" {
+			displayMessage = "⏳ Processing your request, please wait..."
+		}
+		
 		if ws.GlobalHub != nil {
 			payload, err := json.Marshal(map[string]interface{}{
 				"type":               "chat",
-				"message":            message,
+				"message":            displayMessage,
 				"title":              title,
 				"conversation_state": conversationState,
+				"executing":          executeFlag == "true",
 			})
 			if err == nil {
 				ws.GlobalHub.SendToUser(sendTo, payload)
-				fmt.Printf("[SendMessage] Chat message sent via WebSocket to user %d\n", sendTo)
+				fmt.Printf("[SendMessage] Chat message sent via WebSocket to user %d (executing=%s)\n", sendTo, executeFlag)
 			} else {
 				fmt.Printf("Error marshaling chat payload: %v\n", err)
 			}

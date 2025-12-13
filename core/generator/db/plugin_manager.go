@@ -151,10 +151,38 @@ func HandlePluginUpload(c *fiber.Ctx, db *gorm.DB) error {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// Create Details (for both new and update)
+	// Create or Update Details (for both new and update)
 	for _, detail := range manifest.Details {
 		detail.Componentid = componentID
-		if err := tx.Create(&detail).Error; err != nil {
+		
+		// Check if detail already exists by componentid and inputname
+		var existingDetail models.Componentdetail
+		err := tx.Where("componentid = ? AND inputname = ?", componentID, detail.Inputname).First(&existingDetail).Error
+		
+		if err == gorm.ErrRecordNotFound {
+			// Create new detail
+			if err := tx.Create(&detail).Error; err != nil {
+				tx.Rollback()
+				return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			}
+		} else if err == nil {
+			// Update existing detail
+			existingDetail.Detailtype = detail.Detailtype
+			existingDetail.Lable = detail.Lable
+			existingDetail.Inputtype = detail.Inputtype
+			existingDetail.Inputdesc = detail.Inputdesc
+			existingDetail.Order = detail.Order
+			existingDetail.Datasourcetype = detail.Datasourcetype
+			existingDetail.Datasource = detail.Datasource
+			existingDetail.Datasourceidfield = detail.Datasourceidfield
+			existingDetail.Datasourcenamefield = detail.Datasourcenamefield
+			
+			if err := tx.Save(&existingDetail).Error; err != nil {
+				tx.Rollback()
+				return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			}
+		} else {
+			// Database error
 			tx.Rollback()
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}

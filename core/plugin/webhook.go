@@ -56,7 +56,7 @@ func WebhookHandler(c *fiber.Ctx, db *gorm.DB) error {
 	// 2. Try Internal Workflow
 	// Verify if workflow exists first or just let ExecuteFlow handle it?
 	// ExecuteFlow returns error if workflow invalid.
-	if err := generator.ExecuteFlow(c, db, source, false); err != nil {
+	if err := generator.ExecuteFlow(c, db, source, false, nil); err != nil {
 		if strings.Contains(err.Error(), "does not exist") {
 			return c.Status(http.StatusNotFound).JSON(fiber.Map{"error": fmt.Sprintf("Source '%s' not found (checked plugins and workflows)", source)})
 		}

@@ -23,7 +23,6 @@ type WsPayload struct {
 var GlobalDB *gorm.DB
 
 func WebSocketHandler(c *websocket.Conn) {
-	log.Println("WebSocketHandler: Started")
 	useridVal := c.Locals("userid")
 	if useridVal == nil {
 		c.Close()
@@ -45,17 +44,13 @@ func WebSocketHandler(c *websocket.Conn) {
 		_, msg, err := c.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				log.Println("WS Read Error:", err)
 			}
 			break
 		}
 
-		log.Printf("WS Recv Raw: %s\n", string(msg))
-
 		// Parse generic payload
 		var payload WsPayload
 		if err := json.Unmarshal(msg, &payload); err != nil {
-			log.Println("WS Parse Error:", err)
 			continue
 		}
 

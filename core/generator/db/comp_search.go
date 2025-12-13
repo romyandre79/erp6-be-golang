@@ -279,7 +279,6 @@ func parseSearchParams(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB,
 			}
 		}
 	}
-	log.Info(sp.Enable)
 	return sp
 }
 

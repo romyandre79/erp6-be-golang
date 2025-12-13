@@ -23,7 +23,11 @@ type ExternalPluginOutput struct {
 func RunExternalPlugin(cmdPath string, ctx *WorkflowContext) error {
 	// 1. Prepare Input
 	params := make([]WorkflowDetailResult, len(ctx.Params))
-	copy(params, ctx.Params)
+	// Deep copy and resolve
+	for i, p := range ctx.Params {
+		params[i] = p
+		params[i].CompValue = ResolveParam(ctx.FiberCtx, p.CompValue)
+	}
 
 	// Map of existing param names to avoid duplicates
 	existingParams := make(map[string]int)
@@ -50,31 +54,16 @@ func RunExternalPlugin(cmdPath string, ctx *WorkflowContext) error {
 		}
 	}
 
-	// 1. Update from FormValue (Covers Query and Body for existing keys)
+
+
+	// 1. Use resolved parameters from workflow definition
 	for _, p := range params {
-		val := ctx.FiberCtx.FormValue(p.InputName)
+		val := ResolveParam(ctx.FiberCtx, p.CompValue)
 		upsertParam(p.InputName, val)
 	}
 
-	// 2. Discover NEW dynamic parameters from Query String
-	for k, v := range ctx.FiberCtx.Queries() {
-		upsertParam(k, v)
-	}
-
-	// 3. Discover NEW dynamic parameters from Multipart Form
-	form, err := ctx.FiberCtx.MultipartForm()
-	if err == nil && form != nil {
-		for k, v := range form.Value {
-			if len(v) > 0 {
-				upsertParam(k, v[0])
-			}
-		}
-	}
-
-	// 4. Discover NEW dynamic parameters from PostArgs (x-www-form-urlencoded)
-	ctx.FiberCtx.Request().PostArgs().VisitAll(func(key, value []byte) {
-		upsertParam(string(key), string(value))
-	})
+	// Note: Sections 2-4 (Query/Form/PostArgs discovery) removed to prevent
+	// parameters from previous nodes overwriting current node's parameters
 
 	input := ExternalPluginInput{
 		Params: params,
@@ -100,6 +89,11 @@ func RunExternalPlugin(cmdPath string, ctx *WorkflowContext) error {
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("[ExternalPlugin] Error: %v\nStderr: %s\n", err, errBuf.String())
 		return fmt.Errorf("plugin execution failed: %v, stderr: %s", err, errBuf.String())
+	}
+
+	// Print stderr even on success (for debug messages)
+	if errBuf.Len() > 0 {
+		fmt.Printf("[ExternalPlugin] Stderr: %s\n", errBuf.String())
 	}
 
 	// 4. Parse Output

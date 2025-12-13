@@ -1,11 +1,69 @@
 package generator
 
+/*
+WORKFLOW EXECUTION ENGINE DOCUMENTATION
+
+This file implements the core workflow execution engine for the ERP6 system.
+It handles the execution of visual workflow diagrams created in the frontend designer.
+
+=== ARCHITECTURE OVERVIEW ===
+
+1. WORKFLOW STRUCTURE:
+   - Workflows are stored as JSON in the database (Drawflow format)
+   - Each workflow contains multiple nodes (components) connected by edges
+   - Nodes can be: Start, End, Decision, or custom components (AI, Scraper, SendMessage, etc.)
+
+2. EXECUTION FLOW:
+   ExecuteFlow() → InternalFlow() → Component Handler → InternalFlow() (recursive)
+   
+   - ExecuteFlow: Entry point, loads workflow, initializes state, starts execution
+   - InternalFlow: Executes a single node and recursively calls next connected nodes
+   - Component Handlers: Registered functions that implement specific node logic
+
+3. STATE MANAGEMENT (stored in fiber.Ctx.Locals):
+   - "wfEngine": []WorkflowEngine - Tracks execution history and results of each node
+   - "flowTerminated": bool - Flag to stop execution when End node is reached
+   - "components": []Component - All nodes in the workflow
+   - "scopedParams": map[string]interface{} - Parameters passed to nested workflows
+
+4. DATA FLOW BETWEEN NODES:
+   - Each node stores its result in wfEngine (c.Locals("wfEngine"))
+   - Subsequent nodes can access previous results via ResolveParam() using $variable syntax
+   - Example: If AI node outputs {"action": "scrape"}, next node can use $action
+
+5. EXECUTION ORDER:
+   - Topological sort determines initial order based on connections
+   - Actual execution is recursive, following the connection graph
+   - Decision nodes can branch to different paths based on conditions
+
+6. WEBSOCKET INTEGRATION:
+   - Real-time updates sent to frontend during execution
+   - Events: node_start, node_complete, node_error
+   - Allows live visualization of workflow execution in the designer
+
+=== KEY FUNCTIONS ===
+
+- ExecuteFlow(): Main entry point, orchestrates workflow execution
+- InternalFlow(): Recursive function that executes nodes and follows connections
+- GetWorkflowDetail(): Loads node configuration from database
+- ResolveParam(): Resolves variable references ($var) to actual values
+- appendStepResult(): Records node execution results
+- broadcastNodeUpdate(): Sends WebSocket updates to frontend
+
+=== COMPLEXITY NOTES ===
+
+The current implementation uses recursive traversal which can be hard to debug.
+Consider refactoring to iterative approach with explicit queue/stack for better clarity.
+*/
+
 import (
 	"encoding/json"
 	"erp6-be-golang/core/ws"
 	"erp6-be-golang/models"
 	"errors"
 	"fmt"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -14,10 +72,12 @@ import (
 	"gorm.io/gorm"
 )
 
+// WorkflowDetailResult represents the configuration for a single input/output parameter of a workflow node.
+// This structure is loaded from the database and contains both the component definition and user-configured values.
 type WorkflowDetailResult struct {
-	ComponentDetailID   int    `json:"componentdetailid"`
-	ComponentName       string `json:"componentname"`
-	DetailType          string `json:"detailtype"`
+	ComponentDetailID   int    `json:"componentdetailid"` // Unique ID for this parameter definition
+	ComponentName       string `json:"componentname"`     // Name of the component (e.g., "AI", "Scraper")
+	DetailType          string `json:"detailtype"`        // "input" or "output"
 	Label               string `json:"label"`
 	InputType           string `json:"inputtype"`
 	InputName           string `json:"inputname"`
@@ -30,40 +90,47 @@ type WorkflowDetailResult struct {
 	WfDetailID          int    `json:"wfdetailid"`
 }
 
+// WorkflowEngine tracks the execution state and results of a single node.
+// An array of these is stored in c.Locals("wfEngine") to maintain execution history.
+// This allows subsequent nodes to access results from previous nodes via ResolveParam().
 type WorkflowEngine struct {
-	WorkflowId    int     `json:"workflowId"`
-	NodeId        int     `json:"nodeId"`
-	ComponentName string  `json:"componentName"`
-	DataInputNode any     `json:"input"`
-	ResultNode    any     `json:"result"`
-	Success       bool    `json:"success"`
-	ExecutionTime float64 `json:"executionTime"`
-	Error         string  `json:"error,omitempty"`
+	WorkflowId    int     `json:"workflowId"`    // ID of the workflow being executed
+	NodeId        int     `json:"nodeId"`        // ID of the specific node instance
+	ComponentName string  `json:"componentName"` // Type of component (e.g., "AI", "Scraper")
+	DataInputNode any     `json:"input"`         // Input parameters sent to this node
+	ResultNode    any     `json:"result"`        // Output/result from this node (accessible via $variable)
+	Success       bool    `json:"success"`       // Whether execution succeeded
+	ExecutionTime float64 `json:"executionTime"` // Execution time in milliseconds
+	Error         string  `json:"error,omitempty"` // Error message if failed
 }
 
+// Connection represents an edge between two nodes in the workflow graph.
+// Defines how data flows from one node's output to another node's input.
 type Connection struct {
-	Node   string `json:"node"`
-	Output string `json:"output"`
-	Input  string `json:"input"`
+	Node   string `json:"node"`   // Target node ID
+	Output string `json:"output"` // Output port name on source node
+	Input  string `json:"input"`  // Input port name on target node
 }
 
 type IO struct {
 	Connections []Connection `json:"connections"`
 }
 
+// Component represents a single node in the workflow graph.
+// This structure is deserialized from the Drawflow JSON stored in the database.
 type Component struct {
-	WorkflowId int               `json:"workflowid"`
-	ID         int               `json:"id"`
-	Name       string            `json:"name"`
-	Class      string            `json:"class"`
-	HTML       string            `json:"html"`
-	Typenode   bool              `json:"typenode"`
-	Inputs     map[string]IO     `json:"inputs"`
-	Outputs    map[string]IO     `json:"outputs"`
-	PosX       float64           `json:"pos_x"`
-	PosY       float64           `json:"pos_y"`
-	Data       map[string]string `json:"data"`
-	IsRun      bool              `json:"isrun"`
+	WorkflowId int               `json:"workflowid"` // Parent workflow ID
+	ID         int               `json:"id"`         // Unique node ID within the workflow
+	Name       string            `json:"name"`       // Component type (e.g., "AI", "Scraper", "Start", "End")
+	Class      string            `json:"class"`      // CSS class for frontend rendering
+	HTML       string            `json:"html"`       // HTML template for frontend
+	Typenode   bool              `json:"typenode"`   // Whether this is a special node type
+	Inputs     map[string]IO     `json:"inputs"`     // Input ports and their connections
+	Outputs    map[string]IO     `json:"outputs"`    // Output ports and their connections
+	PosX       float64           `json:"pos_x"`      // X position in designer canvas
+	PosY       float64           `json:"pos_y"`      // Y position in designer canvas
+	Data       map[string]string `json:"data"`       // Additional metadata
+	IsRun      bool              `json:"isrun"`      // Runtime flag to prevent duplicate execution
 }
 
 type FlowData struct {
@@ -74,6 +141,9 @@ type FlowData struct {
 	} `json:"drawflow"`
 }
 
+// GetWorkflowDetail loads the configuration for a specific node from the database.
+// It retrieves both the component definition (inputs/outputs) and user-configured values.
+// Returns an array of WorkflowDetailResult, one for each input/output parameter.
 func GetWorkflowDetail(db *gorm.DB, componentName string, workflowID int, nodeID int) ([]WorkflowDetailResult, error) {
 	var results []WorkflowDetailResult
 
@@ -119,23 +189,105 @@ func GetWorkflowDetail(db *gorm.DB, componentName string, workflowID int, nodeID
 	return results, nil
 }
 
+// handleStart is the component handler for the "Start" node.
+// It initializes the wfEngine array to begin tracking execution.
 func handleStart(c *fiber.Ctx) error {
 	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
-	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: ""})
+	
+	// Load workflow parameters and their values
+	flowName := c.FormValue("flowname")
+	params := make(map[string]interface{})
+	
+	// First, load from workflow definition (defaults)
+	if flowName != "" {
+		// Check if db is available
+		dbInterface := c.Locals("db")
+		if dbInterface != nil {
+			db := dbInterface.(*gorm.DB)
+			
+			// Get workflow parameters definition
+			var wfParams []models.Workflowparameter
+			if err := db.
+				Table("workflowparameter a").
+				Select("a.parametername, a.parametervalue").
+				Joins("INNER JOIN workflow b ON b.workflowid = a.workflowid").
+				Where("b.wfname = ?", flowName).
+				Scan(&wfParams).Error; err == nil {
+				
+				// Load parameter values from form or use default
+				for _, p := range wfParams {
+					val := c.FormValue(p.Parametername)
+					if val == "" && p.Parametervalue != "" {
+						val = p.Parametervalue
+					}
+					params[p.Parametername] = val
+				}
+			}
+		}
+	}
+	
+	// Then, override with parameters from parent workflow (scopedParams takes priority)
+	if scopedParams, ok := c.Locals("scopedParams").(map[string]interface{}); ok {
+		for k, v := range scopedParams {
+			params[k] = v
+		}
+	}
+	
+	// Load conversation state from file (for AI assistant continuity)
+	if userID, ok := c.Locals("userid").(int); ok && userID > 0 {
+		conversationFile := fmt.Sprintf("./tmp/ai_conversations/%d.json", userID)
+		if data, err := os.ReadFile(conversationFile); err == nil {
+			var state map[string]interface{}
+			if json.Unmarshal(data, &state) == nil {
+				if convState, ok := state["conversation_state"].(string); ok && convState != "" {
+					params["conversation_state"] = convState
+					fmt.Printf("[Start Node] Loaded conversation state for user %d\n", userID)
+				}
+			}
+		}
+	}
+	
+	// Debug: Log what parameters we're setting
+	fmt.Printf("[Start Node] Parameters loaded: %+v\n", params)
+	
+	// Make parameters available to subsequent nodes
+	wfEngine = append(wfEngine, WorkflowEngine{
+		DataInputNode: "",
+		ResultNode:    params,
+	})
 	c.Locals("wfEngine", wfEngine)
 	return nil
 }
 
+// GetSearchText retrieves parameter values from various sources (POST, GET, scopedParams).
+// Used primarily for search/filter operations with special handling for date/time fields.
+// Converts string values to LIKE patterns (%value%) for database queries.
 func GetSearchText(c *fiber.Ctx, paramTypes []string, param, defVal, dataType string) string {
 	s := defVal
 
 	for _, t := range paramTypes {
 		switch strings.ToUpper(t) {
 		case "POST":
+			// Check scoped params first (simulating POST/local scope)
+			if scopedParams, ok := c.Locals("scopedParams").(map[string]interface{}); ok {
+				if val, exists := scopedParams[param]; exists {
+					s = fmt.Sprintf("%v", val)
+					break
+				}
+			}
+
 			if val := c.FormValue(param); val != "" {
 				s = val
 			}
 		case "GET":
+			// Check scoped params for GET too? Usually safer to allow it to override both.
+			if scopedParams, ok := c.Locals("scopedParams").(map[string]interface{}); ok {
+				if val, exists := scopedParams[param]; exists {
+					s = fmt.Sprintf("%v", val)
+					break
+				}
+			}
+
 			if val := c.Query(param); val != "" {
 				s = val
 			}
@@ -230,6 +382,17 @@ func init() {
 	})
 }
 
+// InternalFlow executes a single workflow node and recursively processes connected nodes.
+// This is the core execution function that:
+// 1. Checks if node already executed (prevents loops)
+// 2. Loads node configuration from database
+// 3. Executes the component handler
+// 4. Records results in wfEngine
+// 5. Broadcasts WebSocket updates
+// 6. Recursively calls itself for connected nodes
+//
+// COMPLEXITY WARNING: This recursive approach can be hard to debug.
+// Consider refactoring to iterative approach with explicit queue.
 func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int, db *gorm.DB, search bool) error {
 	var flowTerminated = c.Locals("flowTerminated").(bool)
 	var components = c.Locals("components").([]Component)
@@ -246,6 +409,10 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 
 	// Broadcast node start via WebSocket
 	broadcastNodeUpdate(c, "node_start", workflowId, nodeId, component.Name, nil, nil, 0, "")
+	
+	// Small delay to allow frontend to process the event and update UI
+	// This ensures fast-executing components (like Transform) show the "running" state
+	time.Sleep(50 * time.Millisecond)
 
 	// Start timing
 	startTime := time.Now()
@@ -324,6 +491,9 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		wfEngine[len(wfEngine)-1].Success = true
 		wfEngine[len(wfEngine)-1].ExecutionTime = execTime
 		c.Locals("wfEngine", wfEngine)
+		
+		// Broadcast node completion for external plugins
+		broadcastNodeUpdate(c, "node_complete", workflowId, nodeId, component.Name, inputParams, stepResult, execTime, "")
 	} else {
 		// Component didn't append, add our own tracking
 		appendStepResult(c, workflowId, nodeId, component.Name, inputParams, stepResult, true, execTime, "")
@@ -367,7 +537,9 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 	return nil
 }
 
-// appendStepResult adds a step result to the workflow engine
+// appendStepResult adds a node execution record to the wfEngine history.
+// This allows subsequent nodes to access results via ResolveParam($variable).
+// Also broadcasts WebSocket updates to the frontend for live visualization.
 func appendStepResult(c *fiber.Ctx, workflowId int, nodeId int, componentName string, input any, result any, success bool, execTime float64, errMsg string) {
 	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
 	wfEngine = append(wfEngine, WorkflowEngine{
@@ -391,6 +563,9 @@ func appendStepResult(c *fiber.Ctx, workflowId int, nodeId int, componentName st
 }
 
 // broadcastNodeUpdate sends workflow node updates via WebSocket
+// broadcastNodeUpdate sends real-time workflow execution updates via WebSocket.
+// Events: node_start, node_complete, node_error
+// Allows the frontend designer to visualize execution progress in real-time.
 func broadcastNodeUpdate(c *fiber.Ctx, eventType string, workflowId int, nodeId int, componentName string, input any, result any, execTime float64, errMsg string) {
 	if ws.GlobalHub == nil {
 		return
@@ -427,25 +602,50 @@ func broadcastNodeUpdate(c *fiber.Ctx, eventType string, workflowId int, nodeId 
 	}
 }
 
-func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error {
+// ExecuteFlow is the main entry point for workflow execution.
+// It orchestrates the entire workflow execution process:
+// 1. Loads workflow definition from database
+// 2. Parses Drawflow JSON structure
+// 3. Performs topological sort to determine execution order
+// 4. Initializes execution state (wfEngine, components, etc.)
+// 5. Starts execution from the first node (usually "Start")
+// 6. Manages database transaction (commit/rollback)
+//
+// Parameters:
+//   - flowName: Name of the workflow to execute
+//   - search: If true, runs in read-only mode (no transaction)
+//   - params: Optional parameters to pass to the workflow (stored in scopedParams)
+//
+// The actual node-by-node execution is handled by InternalFlow() which is called recursively.
+func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool, params map[string]interface{}) error {
+	// Stack management for scopedParams
+	originalScopedParams := c.Locals("scopedParams")
+	if params != nil {
+		c.Locals("scopedParams", params)
+	}
+	defer c.Locals("scopedParams", originalScopedParams)
+	
+	// Store db in locals for component access
+	c.Locals("db", db)
+
 	var components = []Component{}
 	var wfEngine = []WorkflowEngine{}
 	var flowTerminated = false
 
 	// Get workflow parameters
-	var params []models.Workflowparameter
+	var wfParams []models.Workflowparameter
 	if err := db.
 		Table("workflowparameter a").
 		Select("a.wfparameterid, b.wfname, a.parametername").
 		Joins("INNER JOIN workflow b ON b.workflowid = a.workflowid").
 		Where("b.wfname = ?", flowName).
-		Scan(&params).Error; err != nil {
+		Scan(&wfParams).Error; err != nil {
 		return err
 	}
 
 	// Initialize default parameters
 	postData := make(map[string]interface{})
-	for _, p := range params {
+	for _, p := range wfParams {
 		postData[p.Parametername] = nil
 	}
 
@@ -538,13 +738,24 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 	// Setup database transaction
 	var tx *gorm.DB
 	if !search {
-		tx = db.Begin()
-		defer func() {
-			if r := recover(); r != nil {
-				tx.Rollback()
-				fmt.Printf("Transaction panic: %v\n", r)
-			}
-		}()
+		// Check if we're in a nested workflow (called from Workflow component)
+		isNested, _ := c.Locals("nestedWorkflow").(bool)
+		
+		if isNested {
+			// Nested workflow - reuse the existing transaction
+			tx = db
+			fmt.Printf("[ExecuteFlow] Reusing existing transaction for nested workflow\n")
+		} else {
+			// Top-level workflow - start new transaction
+			tx = db.Begin()
+			defer func() {
+				if r := recover(); r != nil {
+					tx.Rollback()
+					fmt.Printf("Transaction panic: %v\n", r)
+				}
+			}()
+			fmt.Printf("[ExecuteFlow] Started new transaction\n")
+		}
 	} else {
 		tx = db
 	}
@@ -561,12 +772,101 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool) error 
 		return fmt.Errorf("internal flow failed on component %d (%s): %w", ordered[0].ID, ordered[0].Name, err)
 	}
 
-	// Commit transaction
+	// Commit transaction (only for top-level workflows)
 	if !search {
-		if err := tx.Commit().Error; err != nil {
-			return fmt.Errorf("commit failed: %w", err)
+		isNested, _ := c.Locals("nestedWorkflow").(bool)
+		if !isNested {
+			// Top-level workflow - commit the transaction
+			if err := tx.Commit().Error; err != nil {
+				return fmt.Errorf("commit failed: %w", err)
+			}
+			fmt.Printf("[ExecuteFlow] Transaction committed\n")
+		} else {
+			// Nested workflow - don't commit, let parent handle it
+			fmt.Printf("[ExecuteFlow] Skipping commit for nested workflow\n")
 		}
 	}
 
 	return nil
+}
+
+// ResolveParam resolves a parameter value, supporting variable substitution (e.g., $param).
+// This is the key function that enables data flow between workflow nodes.
+//
+// Resolution order:
+// 1. If value starts with $, treat as variable reference
+// 2. Check POST form values (c.FormValue)
+// 3. Check GET query parameters (c.Query)
+// 4. Check previous node results in wfEngine (searches backwards for latest match)
+//    - Checks top-level keys in ResultNode
+//    - Checks nested "data" object in ResultNode
+// 5. If not found, return original value
+//
+// Example: If AI node outputs {"action": "scrape", "url": "example.com"},
+// subsequent nodes can use $action and $url to access these values.
+func ResolveParam(c *fiber.Ctx, val string) string {
+	// Handle embedded variables like: https://example.com?q=$city_name
+	if strings.Contains(val, "$") {
+		result := val
+		// Find all $variable patterns
+		re := regexp.MustCompile(`\$([a-zA-Z_][a-zA-Z0-9_]*)`)
+		matches := re.FindAllStringSubmatch(val, -1)
+		
+		for _, match := range matches {
+			if len(match) >= 2 {
+				varName := match[1]
+				varValue := resolveVariable(c, varName)
+				// Replace $varName with resolved value
+				result = strings.ReplaceAll(result, "$"+varName, varValue)
+			}
+		}
+		return result
+	}
+	
+	// Original behavior for simple $variable
+	if strings.HasPrefix(val, "$") {
+		key := strings.TrimPrefix(val, "$")
+		return resolveVariable(c, key)
+	}
+	
+	return val
+}
+
+// resolveVariable looks up a variable value from various sources
+func resolveVariable(c *fiber.Ctx, key string) string {
+	// 1. Check POST
+	if v := c.FormValue(key); v != "" {
+		return v
+	}
+
+	// 2. Check GET
+	if v := c.Query(key); v != "" {
+		return v
+	}
+
+	// 3. Check node results
+	wfEngine := c.Locals("wfEngine")
+	if wfEngine != nil {
+		if engines, ok := wfEngine.([]WorkflowEngine); ok {
+			// Iterate backwards to find latest match
+			for i := len(engines) - 1; i >= 0; i-- {
+				e := engines[i]
+				if resMap, ok := e.ResultNode.(map[string]interface{}); ok {
+					// Check top level
+					if v, exists := resMap[key]; exists {
+						return fmt.Sprintf("%v", v)
+					}
+					// Check inside "data"
+					if dataMap, ok := resMap["data"].(map[string]interface{}); ok {
+						if v, exists := dataMap[key]; exists {
+							return fmt.Sprintf("%v", v)
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	// Return original key if not found
+	return "$" + key
 }
