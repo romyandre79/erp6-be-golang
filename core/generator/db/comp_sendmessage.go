@@ -117,11 +117,44 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 	}
 
 	// Validate required parameters
-	if sendTo == 0 {
-		return helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_PARAMETER", "sendto is required")
-	}
 	if message == "" {
 		return helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_PARAMETER", "message is required")
+	}
+
+	// If sendTo is 0, broadcast to all users
+	if sendTo == 0 {
+		fmt.Printf("[SendMessage] Broadcasting to all users: message='%s'\n", message)
+		
+		// Get all users from database
+		var users []models.Useraccess
+		if err := db.Find(&users).Error; err != nil {
+			return helpers.FailResponse(c, fiber.StatusInternalServerError, "DB_ERROR", fmt.Sprintf("failed to get users: %v", err))
+		}
+
+		// Send to each user
+		for _, user := range users {
+			// Create notification in usertodo
+			todo := models.Usertodo{
+				Useraccessid: user.Useraccessid,
+				Menuname:     title,
+				Description:  message,
+				Docno:        docNo,
+				Isread:       0,
+			}
+			db.Create(&todo)
+
+			// Send via WebSocket
+			if ws.GlobalHub != nil {
+				payload, _ := json.Marshal(map[string]interface{}{
+					"type": messageType,
+					"data": todo,
+				})
+				ws.GlobalHub.SendToUser(user.Useraccessid, payload)
+			}
+		}
+
+		fmt.Printf("[SendMessage] Broadcast complete: sent to %d users\n", len(users))
+		return nil
 	}
 
 	// Handle based on message type

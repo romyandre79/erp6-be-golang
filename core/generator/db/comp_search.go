@@ -39,7 +39,7 @@ type SearchParams struct {
 	Offset   int
 }
 
-func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr string, userId interface{}) string {
+func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr string, userId interface{}, isRow bool) string {
 	driver := GetDatabaseDriver(db)
 	whereStat := ""
 	wheres := strings.Fields(compValue)
@@ -149,20 +149,31 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 				}
 			} else {
 				// Default → LIKE
-				if strings.Contains(data, ".") {
+				if strings.Contains(data, "=") {
+					funcs := strings.Split(data, "=")
+					val := GetSearchText(c, []string{"POST"}, funcs[1], "", "string")
+					whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", data, val)
+				} else if strings.Contains(data, ".") {
 					funcs := strings.Split(data, ".")
 					val := GetSearchText(c, []string{"POST"}, funcs[1], "", "string")
-
+					cleanVal := strings.ReplaceAll(val, "%", "")
 					if strings.HasSuffix(strings.ToLower(funcs[1]), "id") {
 						// Strip wildcards for ID exact match
-						cleanVal := strings.ReplaceAll(val, "%", "")
 						if cleanVal == "" {
-						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, val)
+							if isRow {
+								whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", data, cleanVal)
+							} else {
+								whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, val)
+							}
 						} else {
-						whereStat += fmt.Sprintf("(%s = '%s') ", data, cleanVal)
+							whereStat += fmt.Sprintf("(%s = '%s') ", data, cleanVal)
 						}
 					} else {
-						whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, val)
+						if isRow {
+							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", data, cleanVal)
+						} else {
+							whereStat += fmt.Sprintf("(COALESCE(%s,'') LIKE '%s') ", data, val)
+						}
 					}
 				} else {
 					whereStat += " " + data + " "
@@ -237,7 +248,7 @@ func parseSelectClause(selectStr string) string {
 	return strings.Join(newParts, ", ")
 }
 
-func parseSearchParams(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, suffix string) SearchParams {
+func parseSearchParams(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, suffix string, isRow bool) SearchParams {
 	sp := SearchParams{
 		Enable: true,
 		Page:   1,
@@ -252,7 +263,7 @@ func parseSearchParams(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB,
 		val := strings.TrimSpace(p.CompValue)
 
 		if name == "where"+suffix {
-			sp.Where = parseWhereClause(c, db, val, userNameStr, userId)
+			sp.Where = parseWhereClause(c, db, val, userNameStr, userId, isRow)
 		} else if name == "paging" && suffix == "" { // Paging usually only for main search
 			if val == "true" {
 				sp.Page, _ = strconv.Atoi(GetSearchText(c, []string{"POST", "GET"}, "page", "1", "int"))
@@ -283,7 +294,7 @@ func parseSearchParams(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB,
 }
 
 func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, suffix string, isSingle bool, isRow bool) error {
-	sp := parseSearchParams(c, params, db, suffix)
+	sp := parseSearchParams(c, params, db, suffix, isRow)
 	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
 	resultStat := make(map[string]interface{})
 
@@ -388,7 +399,7 @@ func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.D
 				if rowResult != nil {
 					resultStat["data"] = rowResult
 				} else {
-					helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA RETRIEVED", "")
+					helpers.SuccessResponse(c, "INVALID DATA RETRIEVED", "")
 					return nil
 				}
 			} else {
@@ -419,7 +430,7 @@ func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.D
 			helpers.SuccessResponse(c, "DATA RETRIEVED", sqlState)
 		}
 	} else {
-		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA RETRIEVED", "EMPTY_QUERY")
+		helpers.SuccessResponse(c, "INVALID DATA RETRIEVED", "EMPTY_QUERY")
 	}
 
 	return nil

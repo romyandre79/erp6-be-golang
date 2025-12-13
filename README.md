@@ -270,7 +270,132 @@ Will display as 2 lines, not 1.
 
 ---
 
+---
+
+## SAP-Style Record Locking System
+
+Prevent concurrent editing conflicts with hard locks on database records.
+
+### Overview
+
+When a user opens a record for editing, it's **locked** - other users cannot edit it until the lock is released. This prevents data loss from simultaneous edits.
+
+### Components
+
+#### 1. LockRecord
+Locks a record for editing.
+
+**Parameters:**
+- `tablename`: Table name (e.g., "invoice", "purchase_order")
+- `recordid`: Record ID to lock
+- `locktype`: Lock type (optional, default: "edit")
+
+**Behavior:**
+- If already locked by same user → refreshes lock
+- If locked by another user → returns error with username
+- If not locked → creates lock and notifies all users
+
+**Example:**
+```json
+{
+  "tablename": "invoice",
+  "recordid": "$invoice_id",
+  "locktype": "edit"
+}
+```
+
+#### 2. UnlockRecord
+Releases a lock on a record.
+
+**Parameters:**
+- `tablename`: Table name
+- `recordid`: Record ID to unlock
+
+**Behavior:**
+- Deletes lock (only if locked by current user)
+- Notifies all users that record is available
+- Safe to call even if no lock exists
+
+**Example:**
+```json
+{
+  "tablename": "invoice",
+  "recordid": "$invoice_id"
+}
+```
+
+### Workflow Pattern
+
+**On Form Open:**
+```
+Start → LockRecord → (success) → Show Edit Form
+                  ↓ (locked)
+                  → SendMessage (error) → End
+```
+
+**On Form Save/Close:**
+```
+Save/Close → UnlockRecord → End
+```
+
+### Notifications
+
+**Lock Notification (WebSocket):**
+```json
+{
+  "type": "record_locked",
+  "tablename": "invoice",
+  "recordid": 123,
+  "locked_by_name": "John Doe",
+  "locked_at": "2025-12-13T17:50:00Z"
+}
+```
+
+**Unlock Notification:**
+```json
+{
+  "type": "record_unlocked",
+  "tablename": "invoice",
+  "recordid": 123,
+  "unlocked_by_name": "John Doe"
+}
+```
+
+### Database Setup
+
+Run migration to create `recordlock` table:
+
+```sql
+CREATE TABLE recordlock (
+    recordlockid INT AUTO_INCREMENT PRIMARY KEY,
+    tablename VARCHAR(100) NOT NULL,
+    recordid INT NOT NULL,
+    lockedby INT NOT NULL,
+    lockedat TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    locktype VARCHAR(50) DEFAULT 'edit',
+    sessionid VARCHAR(255),
+    UNIQUE KEY unique_lock (tablename, recordid)
+);
+```
+
+### Broadcast Messages
+
+**SendMessage with `user_id = 0`:**
+Sends notification to ALL users in database.
+
+**Example:**
+```json
+{
+  "sendto": "0",
+  "message": "System maintenance in 5 minutes",
+  "title": "System Alert"
+}
+```
+
+---
+
 ## Quick Reference
+
 
 ### Scraper Actions
 - `get_html` - Get raw HTML
