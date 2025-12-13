@@ -42,11 +42,6 @@ func handleSaveLog(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) err
 		}
 	}
 
-	// Validate required parameters
-	if logContent == "" {
-		return helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_PARAMETER", "logcontent is required")
-	}
-
 	// Validate logtype
 	if logType != "file" && logType != "remote" && logType != "db" {
 		return helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_LOG_TYPE", "logtype must be file, remote, or db")

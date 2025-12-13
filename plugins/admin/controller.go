@@ -5,6 +5,7 @@ import (
 	gendb "erp6-be-golang/core/generator/db"
 	genfile "erp6-be-golang/core/generator/file"
 	"erp6-be-golang/core/helpers"
+	"erp6-be-golang/core/scheduler"
 	"erp6-be-golang/models"
 	"erp6-be-golang/response"
 	"fmt"
@@ -278,9 +279,19 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return helpers.FailResponse(c, 401, "INVALID_CONVERSION", err.Error())
 	}
 
-	err = gendb.ExecuteFlow(c, db, flowName, bSearch)
+	err = gendb.ExecuteFlow(c, db, flowName, bSearch, nil)
 	if err != nil {
 		return helpers.FailResponse(c, 401, "INVALID_FLOW", err.Error())
+	}
+
+	// Auto-reload scheduler if this was a workflow modification
+	if strings.Contains(flowName, "modif") && strings.Contains(flowName, "workflow") {
+		go func() {
+			log.Info("Workflow modified - reloading scheduler...")
+			scheduler.SyncJobsFromWorkflows(db)
+			scheduler.LoadJobs(db) // Reload the cron scheduler with updated jobs
+			log.Info("Scheduler reloaded successfully")
+		}()
 	}
 
 	// If debug mode, return step results
@@ -297,7 +308,7 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 }
 
 func LoadThemeHandler(c *fiber.Ctx, db *gorm.DB) error {
-	err := gendb.ExecuteFlow(c, db, "searchcombotheme", true)
+	err := gendb.ExecuteFlow(c, db, "searchcombotheme", true, nil)
 	if err != nil {
 		return helpers.FailResponse(c, 401, "INVALID_FLOW", err.Error())
 	}

@@ -11,6 +11,7 @@ type Jobs struct {
 	Version      string    `gorm:"column:version;type:varchar(100);not null;default:''" json:"version"`
 	CreatedBy    string    `gorm:"column:createdby;type:varchar(100);not null;default:''" json:"createdby"`
 	Flow         string    `gorm:"column:flow;type:varchar(100);not null;default:''" json:"flow"`
+	Executable   string    `gorm:"column:executable;type:varchar(500);not null;default:''" json:"executable"`
 	Schedule     string    `gorm:"column:schedule;type:varchar(100);not null;default:''" json:"schedule"`
 	IsRunning    int       `gorm:"column:isrunning;type:tinyint(4);not null" json:"is_running"`
 	LastRunning  time.Time `gorm:"column:lastrunning;type:timestamp;not null" json:"last_running"`

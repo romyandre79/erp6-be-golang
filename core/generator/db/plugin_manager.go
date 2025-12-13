@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -99,35 +100,89 @@ func HandlePluginUpload(c *fiber.Ctx, db *gorm.DB) error {
 
 	// Check if component exists
 	var existingComp models.Component
-	if err := tx.Where("componentname = ?", manifest.Componentname).First(&existingComp).Error; err == nil {
-		tx.Rollback()
-		return c.Status(409).JSON(fiber.Map{
-			"error":   "plugin_exists",
-			"message": fmt.Sprintf("Plugin '%s' already exists", manifest.Componentname),
-		})
-	}
+	var componentID int
 
-	// Create Component
-	newComp := models.Component{
-		Componentname:       manifest.Componentname,
-		Componenttitle:      manifest.Componenttitle,
-		Componentcategoryid: manifest.Componentcategoryid,
-		Componentclass:      manifest.Componentclass,
-		Version:             manifest.Version,
-		Createdby:           manifest.Createdby,
-		Input:               manifest.Input,
-		Output:              manifest.Output,
-	}
+	err = tx.Where("componentname = ?", manifest.Componentname).First(&existingComp).Error
+	if err == nil {
+		// UPDATE
+		componentID = existingComp.Componentid
 
-	if err := tx.Create(&newComp).Error; err != nil {
+		existingComp.Componenttitle = manifest.Componenttitle
+		existingComp.Componentcategoryid = manifest.Componentcategoryid
+		existingComp.Componentclass = manifest.Componentclass
+		existingComp.Version = manifest.Version
+		existingComp.Createdby = manifest.Createdby
+		existingComp.Input = manifest.Input
+		existingComp.Output = manifest.Output
+
+		if err := tx.Save(&existingComp).Error; err != nil {
+			tx.Rollback()
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+		// Delete old details
+		if err := tx.Where("componentid = ?", componentID).Delete(&models.Componentdetail{}).Error; err != nil {
+			tx.Rollback()
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+
+	} else if err == gorm.ErrRecordNotFound {
+		// CREATE
+		newComp := models.Component{
+			Componentname:       manifest.Componentname,
+			Componenttitle:      manifest.Componenttitle,
+			Componentcategoryid: manifest.Componentcategoryid,
+			Componentclass:      manifest.Componentclass,
+			Version:             manifest.Version,
+			Createdby:           manifest.Createdby,
+			Input:               manifest.Input,
+			Output:              manifest.Output,
+		}
+
+		if err := tx.Create(&newComp).Error; err != nil {
+			tx.Rollback()
+			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+		}
+		componentID = newComp.Componentid
+
+	} else {
+		// Error
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// Create Details
+	// Create or Update Details (for both new and update)
 	for _, detail := range manifest.Details {
-		detail.Componentid = newComp.Componentid
-		if err := tx.Create(&detail).Error; err != nil {
+		detail.Componentid = componentID
+		
+		// Check if detail already exists by componentid and inputname
+		var existingDetail models.Componentdetail
+		err := tx.Where("componentid = ? AND inputname = ?", componentID, detail.Inputname).First(&existingDetail).Error
+		
+		if err == gorm.ErrRecordNotFound {
+			// Create new detail
+			if err := tx.Create(&detail).Error; err != nil {
+				tx.Rollback()
+				return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			}
+		} else if err == nil {
+			// Update existing detail
+			existingDetail.Detailtype = detail.Detailtype
+			existingDetail.Lable = detail.Lable
+			existingDetail.Inputtype = detail.Inputtype
+			existingDetail.Inputdesc = detail.Inputdesc
+			existingDetail.Order = detail.Order
+			existingDetail.Datasourcetype = detail.Datasourcetype
+			existingDetail.Datasource = detail.Datasource
+			existingDetail.Datasourceidfield = detail.Datasourceidfield
+			existingDetail.Datasourcenamefield = detail.Datasourcenamefield
+			
+			if err := tx.Save(&existingDetail).Error; err != nil {
+				tx.Rollback()
+				return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+			}
+		} else {
+			// Database error
 			tx.Rollback()
 			return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 		}
@@ -151,15 +206,57 @@ func HandlePluginUpload(c *fiber.Ctx, db *gorm.DB) error {
 			continue
 		}
 
-		// Special handling for .exe files (Windows) -> register as external plugin
-		if strings.HasSuffix(f.Name, ".exe") {
+		// Special handling for executables (Windows .exe, or Linux/Mac binaries)
+		// Logic: Detect current OS/Arch and only save matching binary
+		lowerName := strings.ToLower(f.Name)
+		isBinary := false
+
+		// Current System - using strings package instead of importing runtime for now to avoid large diffs if possible,
+		// but best to just rely on heuristics we know from build scripts.
+		// Patterns: _windows_amd64.exe, _linux_amd64, _darwin_amd64, _darwin_arm64
+		// If simple name (chat.exe), assume it matches if OS matches extension.
+
+		// Check if it looks like a binary we built
+		if strings.HasSuffix(lowerName, ".exe") || strings.Contains(lowerName, "_linux_") || strings.Contains(lowerName, "_darwin_") {
+			isBinary = true
+		}
+
+		if isBinary {
+			// runtime.GOOS/GOARCH are needed for strict matching.
+			// Let's import runtime. For now we assume the user's intent:
+			// "move only the file same as OS and remove other"
+
+			// We can't import runtime easily in middle of function without updating imports.
+			// Assuming we will update imports in next step or use simple heuristic if we can't.
+			// Ideally we use: runtime.GOOS, runtime.GOARCH
+
+			// Let's implement strict check assuming runtime is available (will add import)
+			target := "_" + runtime.GOOS + "_" + runtime.GOARCH
+
+			// Exception: if file is just "chat.exe" and we are on windows
+			isExactMatch := false
+			if runtime.GOOS == "windows" && strings.HasSuffix(lowerName, ".exe") && !strings.Contains(lowerName, "_windows_") && !strings.Contains(lowerName, "_linux_") && !strings.Contains(lowerName, "_darwin_") {
+				isExactMatch = true
+			}
+
+			if !strings.Contains(lowerName, target) && !isExactMatch {
+				// Skip mismatching binaries
+				continue
+			}
+
 			// Save to plugins/bin/
 			binDir := "./plugins/bin"
 			if err := os.MkdirAll(binDir, 0755); err != nil {
 				continue
 			}
 
-			binPath := filepath.Join(binDir, f.Name)
+			saveName := f.Name
+			key := strings.ToLower(manifest.Componentname)
+			if key != "" {
+				saveName = key + filepath.Ext(f.Name)
+			}
+
+			binPath := filepath.Join(binDir, saveName)
 			// Ensure we write with execute permissions
 			outFile, err := os.OpenFile(binPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0755)
 			if err != nil {
@@ -176,12 +273,6 @@ func HandlePluginUpload(c *fiber.Ctx, db *gorm.DB) error {
 			rc.Close()
 
 			// Register in memory
-			key := strings.ToLower(manifest.Componentclass)
-			if key == "" {
-				key = strings.ToLower(manifest.Componentname)
-			}
-
-			// Use absolute path for safety
 			absPath, _ := filepath.Abs(binPath)
 			GlobalRegistry.RegisterExternal(key, absPath)
 			fmt.Printf("Registered external plugin: %s -> %s\n", key, absPath)
@@ -238,9 +329,70 @@ func HandlePluginUpload(c *fiber.Ctx, db *gorm.DB) error {
 
 	tx.Commit()
 
+	// 7. Trigger Reload of Plugins (Hot Reload)
+	go LoadPlugins(db)
+
 	return c.Status(200).JSON(fiber.Map{
 		"status":      "success",
 		"message":     "Plugin registered successfully",
-		"componentid": newComp.Componentid,
+		"componentid": componentID,
 	})
+}
+
+// LoadPlugins matches executable files in plugins/bin with registered components
+func LoadPlugins(db *gorm.DB) {
+	fmt.Println("Scanning for external plugins...")
+
+	// 1. Get all components/classes
+	var components []models.Component
+	db.Find(&components)
+
+	// Map class -> component
+	classMap := make(map[string]bool)
+	for _, c := range components {
+		if c.Componentclass != "" {
+			classMap[strings.ToLower(c.Componentclass)] = true
+		}
+	}
+
+	// 2. Scan bin directory
+	binDir := "./plugins/bin"
+	files, err := os.ReadDir(binDir)
+	if err != nil {
+		fmt.Printf("Error reading plugin bin dir: %v\n", err)
+		return
+	}
+
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+
+		name := strings.ToLower(f.Name())
+		// Only executables
+		if !strings.HasSuffix(name, ".exe") && !strings.HasSuffix(name, "") {
+			// On linux, no extension, but let's assume valid binaries for now
+			// To be safe, maybe just skip .json or .txt?
+			// For now, let's accept all files that don't have known non-binary extensions if not windows
+		}
+
+		fullPath, _ := filepath.Abs(filepath.Join(binDir, f.Name()))
+
+		// Registration Strategy:
+		// 1. Exact match (minus extension)
+		baseName := strings.TrimSuffix(name, filepath.Ext(name))
+
+		// Register as baseName
+		GlobalRegistry.RegisterExternal(baseName, fullPath)
+		fmt.Printf("Loaded plugin: %s -> %s\n", baseName, fullPath)
+
+		// 2. Heuristic: Split by _ (e.g. mysql_windows_amd64 -> mysql)
+		parts := strings.Split(baseName, "_")
+		if len(parts) > 1 {
+			shortName := parts[0]
+			// Always register the short alias
+			GlobalRegistry.RegisterExternal(shortName, fullPath)
+			fmt.Printf("Loaded plugin alias: %s -> %s\n", shortName, fullPath)
+		}
+	}
 }

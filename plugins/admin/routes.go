@@ -2,7 +2,9 @@
 package admin
 
 import (
+	"encoding/json"
 	dbgenerator "erp6-be-golang/core/generator/db"
+	"erp6-be-golang/models"
 
 	"erp6-be-golang/core/ws"
 
@@ -24,10 +26,32 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	ws.GlobalHub = ws.NewHub()
 	go ws.GlobalHub.Run()
 
+	// Implement Hub Callbacks
+	ws.GlobalHub.OnUserOnline = func(userID int) {
+		db.Model(&models.Useraccess{}).Where("useraccessid = ?", userID).Update("isonline", 1)
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":     "status_update",
+			"user_id":  userID,
+			"isonline": 1,
+		})
+		ws.GlobalHub.Broadcast <- msg
+	}
+
+	ws.GlobalHub.OnUserOffline = func(userID int) {
+		db.Model(&models.Useraccess{}).Where("useraccessid = ?", userID).Update("isonline", 0)
+		msg, _ := json.Marshal(map[string]interface{}{
+			"type":     "status_update",
+			"user_id":  userID,
+			"isonline": 0,
+		})
+		ws.GlobalHub.Broadcast <- msg
+	}
+
 	// Set GlobalDB for WebSocket handlers
 	GlobalDB = db
 
-	auth := app.Group("/auth")
+	// Public routes
+	auth := app.Group("/api/auth")
 
 	// Public routes
 	auth.Post("/login", func(c *fiber.Ctx) error { return LoginHandler(c, db) })
@@ -41,7 +65,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		auth.Get("/me", func(c *fiber.Ctx) error { return MeHander(c, db) })
 	}
 
-	admin := app.Group("/admin")
+	admin := app.Group("/api/admin")
 	admin.Use(AuthMiddleware)
 	{
 		admin.Get("/getmenu", func(c *fiber.Ctx) error { return MenuSingleNameHandler(c, db) })
@@ -56,6 +80,23 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 			return dbgenerator.HandlePluginUpload(c, db)
 		})
 
+		// Module Management Routes
+		admin.Post("/module/upload", func(c *fiber.Ctx) error {
+			return UploadModulePackageHandler(c, db)
+		})
+		admin.Post("/module/uninstall/:moduleid", func(c *fiber.Ctx) error {
+			return UninstallModuleHandler(c, db)
+		})
+		admin.Get("/module/details/:moduleid", func(c *fiber.Ctx) error {
+			return GetModuleDetailsHandler(c, db)
+		})
+		admin.Get("/module/dependencies/:moduleid", func(c *fiber.Ctx) error {
+			return GetModuleDependenciesHandler(c, db)
+		})
+		admin.Get("/module/export/:moduleid", func(c *fiber.Ctx) error {
+			return ExportModuleHandler(c, db)
+		})
+
 		// Notification Routes
 		admin.Get("/notifications/unread", func(c *fiber.Ctx) error { return GetUnreadNotifications(c, db) })
 		admin.Post("/notifications/:id/read", func(c *fiber.Ctx) error { return MarkAsRead(c, db) })
@@ -63,10 +104,44 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 
 		// Chat Routes
 		admin.Get("/users/list", func(c *fiber.Ctx) error { return GetUserListHandler(c, db) })
+		// Chat Routes
+		admin.Get("/users/list", func(c *fiber.Ctx) error { return GetUserListHandler(c, db) })
 		admin.Get("/chat/history", func(c *fiber.Ctx) error { return GetChatHistoryHandler(c, db) })
+
+		// DB Backup/Restore
+		admin.Post("/db/backup", func(c *fiber.Ctx) error { return BackupHandler(c, db) })
+		admin.Post("/db/restore", func(c *fiber.Ctx) error { return RestoreHandler(c, db) })
+
+		// DB Reverse Engineering
+		admin.Post("/db/reverse-engineer", func(c *fiber.Ctx) error { return ReverseEngineerHandler(c, db) })
+
+		// DB Resources (Relations & Areas)
+		admin.Post("/db/relations/save", func(c *fiber.Ctx) error { return SaveRelationsHandler(c, db) })
+		admin.Get("/db/relations", func(c *fiber.Ctx) error { return GetRelationsHandler(c, db) })
+		admin.Delete("/db/relations/:id", func(c *fiber.Ctx) error { return DeleteRelationHandler(c, db) })
+
+		admin.Post("/db/areas/save", func(c *fiber.Ctx) error { return SaveAreasHandler(c, db) })
+		admin.Get("/db/areas", func(c *fiber.Ctx) error { return GetAreasHandler(c, db) })
+		admin.Delete("/db/areas/:id", func(c *fiber.Ctx) error { return DeleteAreaHandler(c, db) })
+
+		// Report Designer Routes
+		admin.Post("/report-templates", func(c *fiber.Ctx) error { return CreateReportTemplate(c, db) })
+		admin.Get("/report-templates", func(c *fiber.Ctx) error { return ListReportTemplates(c, db) })
+		admin.Get("/report-templates/:id", func(c *fiber.Ctx) error { return GetReportTemplate(c, db) })
+		admin.Put("/report-templates/:id", func(c *fiber.Ctx) error { return UpdateReportTemplate(c, db) })
+		admin.Delete("/report-templates/:id", func(c *fiber.Ctx) error { return DeleteReportTemplate(c, db) })
+		admin.Post("/report-templates/:id/preview", func(c *fiber.Ctx) error { return PreviewReport(c, db) })
+		admin.Post("/report-templates/:id/execute", func(c *fiber.Ctx) error { return ExecuteReport(c, db) })
+
+		// JRXML Import/Export Routes
+		admin.Post("/report-templates/import-jrxml", func(c *fiber.Ctx) error { return ImportJRXML(c, db) })
+		admin.Get("/report-templates/:id/export-jrxml", func(c *fiber.Ctx) error { return ExportJRXML(c, db) })
+
+		// Scheduler Management
+		admin.Post("/scheduler/reload", func(c *fiber.Ctx) error { return ReloadSchedulerHandler(c, db) })
 	}
 
-	app.Get("/ws/notifications",
+	app.Get("/api/ws/notifications",
 		AuthMiddleware, // ✅ Auth first
 		func(c *fiber.Ctx) error { // ✅ Then check WS upgrade
 			if websocket.IsWebSocketUpgrade(c) {
@@ -78,7 +153,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		websocket.New(WebSocketHandler),
 	)
 
-	media := app.Group("/media")
+	media := app.Group("/api/media")
 	media.Use(AuthMiddleware)
 	{
 		media.Get("/", ListMedia)

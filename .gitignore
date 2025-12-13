@@ -8,6 +8,7 @@
 
 # Test binary, built with `go test -c`
 *.test
+*.exe
 
 # Code coverage profiles and other test artifacts
 *.out
@@ -23,7 +24,6 @@ go.work
 go.work.sum
 
 # env file
-.env
 
 # Editor/IDE
 # .idea/

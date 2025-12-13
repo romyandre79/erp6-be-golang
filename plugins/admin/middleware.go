@@ -36,16 +36,13 @@ func ValidateToken(rawToken string) (*CustomClaims, error) {
 // AuthMiddleware validates JWT tokens for protected routes
 // This middleware can be used by any plugin
 func AuthMiddleware(c *fiber.Ctx) error {
-	log.Println("AuthMiddleware: Starting")
 	authHeader := c.Get("Authorization")
 	if authHeader == "" {
 		// Try to get from query param (for WebSocket)
 		tokenQuery := c.Query("token")
 		if tokenQuery != "" {
-			log.Println("AuthMiddleware: Found token in query")
 			authHeader = "Bearer " + tokenQuery
 		} else {
-			log.Println("AuthMiddleware: No token found")
 			return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_HEADER", "")
 		}
 	}

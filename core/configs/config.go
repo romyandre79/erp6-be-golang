@@ -10,6 +10,7 @@ import (
 type Config struct {
 	AppName               string
 	AppEnv                string
+	AppHost                string
 	AppPort               string
 	AllowOrigin           string
 	ReadBufferSize        string
@@ -53,12 +54,15 @@ var ConfigApps *Config
 
 func LoadConfig() {
 	if err := godotenv.Load(); err != nil {
-		panic("No .env file found, using system env")
+		// Just log error, don't panic. The system might be using real env vars.
+		// panic("No .env file found, using system env")
+		helpers.IsError(err, "No .env file found, using system env or defaults", false)
 	}
 
 	ConfigApps = &Config{
 		AppName:               getEnv("APP_NAME", ""),
 		AppEnv:                getEnv("APP_ENV", ""),
+		AppHost:                getEnv("APP_HOST", ""),
 		AppPort:               getEnv("APP_PORT", ""),
 		AllowOrigin:           getEnv("ALLOW_ORIGIN", ""),
 		BodyLimit:             getEnv("BODY_LIMIT", ""),
@@ -95,11 +99,12 @@ func LoadConfig() {
 		ReportPass:            getEnv("REPORT_PASS", ""),
 		ReportTime:            getEnv("REPORT_TIME", ""),
 		WriteBufferSize:       getEnv("WRITE_BUFFER_SIZE", ""),
-		ExternalComponentPath: getEnv("EXTERNAL_COMPONENT_PATH", "./temp_external_components"),
+		ExternalComponentPath: getEnv("EXTERNAL_COMPONENT_PATH", "./public/plugins"),
 	}
 
 	// check .env details
 	helpers.IsEmptyLog(ConfigApps.AppName, "APP_NAME", true)
+	helpers.IsEmptyLog(ConfigApps.AppHost, "APP_HOST", true)
 	helpers.IsEmptyLog(ConfigApps.AppEnv, "APP_ENV", true)
 	helpers.IsEmptyLog(ConfigApps.AppPort, "APP_PORT", true)
 	helpers.IsEmptyLog(ConfigApps.AppPort, "ALLOW_ORIGIN", true)
