@@ -62,15 +62,11 @@ func LoadJobs(db *gorm.DB) {
 
 	// recordstatus = 1 means the job is active/enabled in the schedule
 	if err := db.Where("recordstatus = ?", 1).Find(&jobs).Error; err != nil {
-		log.Println("Error loading jobs:", err)
 		return
 	}
 
-	log.Printf("Found %d active jobs in database", len(jobs))
-
 	for _, job := range jobs {
 		if job.Schedule == "" {
-			log.Printf("Job %s has empty schedule, skipping", job.JobName)
 			continue
 		}
 
@@ -170,7 +166,7 @@ func runJob(gormDB *gorm.DB, job models.Jobs) {
 		ctx.Locals("wfEngine", wfEngine)
 		ctx.Locals("flowTerminated", false)
 
-		if err := generator.ExecuteFlow(ctx, gormDB, job.Flow, false); err != nil {
+		if err := generator.ExecuteFlow(ctx, gormDB, job.Flow, false, nil); err != nil {
 			log.Printf("Error executing flow %s: %v", job.Flow, err)
 		} else {
 			log.Printf("Flow %s executed successfully", job.Flow)
