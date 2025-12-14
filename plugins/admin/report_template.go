@@ -17,9 +17,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// CreateReportTemplate creates a new report template
-func CreateReportTemplate(c *fiber.Ctx, db *gorm.DB) error {
-	var template models.ReportTemplate
+// CreateReport creates a new report template
+func CreateReport(c *fiber.Ctx, db *gorm.DB) error {
+	var template models.Report
 
 	if err := c.BodyParser(&template); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -47,9 +47,9 @@ func CreateReportTemplate(c *fiber.Ctx, db *gorm.DB) error {
 	})
 }
 
-// ListReportTemplates lists all report templates
-func ListReportTemplates(c *fiber.Ctx, db *gorm.DB) error {
-	var templates []models.ReportTemplate
+// ListReports lists all report templates
+func ListReports(c *fiber.Ctx, db *gorm.DB) error {
+	var templates []models.Report
 
 	query := db.Where("recordstatus = 1")
 
@@ -76,12 +76,12 @@ func ListReportTemplates(c *fiber.Ctx, db *gorm.DB) error {
 	})
 }
 
-// GetReportTemplate gets a single report template by ID
-func GetReportTemplate(c *fiber.Ctx, db *gorm.DB) error {
+// GetReport gets a single report template by ID
+func GetReport(c *fiber.Ctx, db *gorm.DB) error {
 	id := c.Params("id")
 
-	var template models.ReportTemplate
-	if err := db.Where("reporttemplateid = ? AND recordstatus = 1", id).First(&template).Error; err != nil {
+	var template models.Report
+	if err := db.Where("Reportid = ? AND recordstatus = 1", id).First(&template).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"code":    404,
@@ -102,12 +102,12 @@ func GetReportTemplate(c *fiber.Ctx, db *gorm.DB) error {
 	})
 }
 
-// UpdateReportTemplate updates an existing report template
-func UpdateReportTemplate(c *fiber.Ctx, db *gorm.DB) error {
+// UpdateReport updates an existing report template
+func UpdateReport(c *fiber.Ctx, db *gorm.DB) error {
 	id := c.Params("id")
 
-	var template models.ReportTemplate
-	if err := db.Where("reporttemplateid = ?", id).First(&template).Error; err != nil {
+	var template models.Report
+	if err := db.Where("Reportid = ?", id).First(&template).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"code":    404,
@@ -121,7 +121,7 @@ func UpdateReportTemplate(c *fiber.Ctx, db *gorm.DB) error {
 		})
 	}
 
-	var updates models.ReportTemplate
+	var updates models.Report
 	if err := c.BodyParser(&updates); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"code":    400,
@@ -131,7 +131,7 @@ func UpdateReportTemplate(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	updates.UpdateDate = time.Now()
-	updates.ReportTemplateID = template.ReportTemplateID
+	updates.ReportID = template.ReportID
 
 	if err := db.Model(&template).Updates(updates).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -148,12 +148,12 @@ func UpdateReportTemplate(c *fiber.Ctx, db *gorm.DB) error {
 	})
 }
 
-// DeleteReportTemplate soft deletes a report template
-func DeleteReportTemplate(c *fiber.Ctx, db *gorm.DB) error {
+// DeleteReport soft deletes a report template
+func DeleteReport(c *fiber.Ctx, db *gorm.DB) error {
 	id := c.Params("id")
 
-	result := db.Model(&models.ReportTemplate{}).
-		Where("reporttemplateid = ?", id).
+	result := db.Model(&models.Report{}).
+		Where("Reportid = ?", id).
 		Update("recordstatus", 0)
 
 	if result.Error != nil {
@@ -223,7 +223,7 @@ func ImportJRXML(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	// Parse JSON to get page dimensions
-	var templateData jrxml.ReportTemplate
+	var templateData jrxml.Report
 	if err := json.Unmarshal([]byte(jsonContent), &templateData); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"code":    500,
@@ -233,7 +233,7 @@ func ImportJRXML(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	// Create new report template
-	template := models.ReportTemplate{
+	template := models.Report{
 		ReportName:     c.FormValue("reportname"),
 		ReportDesc:     c.FormValue("reportdesc"),
 		ReportCategory: c.FormValue("reportcategory"),
@@ -272,8 +272,8 @@ func ImportJRXML(c *fiber.Ctx, db *gorm.DB) error {
 func ExportJRXML(c *fiber.Ctx, db *gorm.DB) error {
 	id := c.Params("id")
 
-	var template models.ReportTemplate
-	if err := db.Where("reporttemplateid = ? AND recordstatus = 1", id).First(&template).Error; err != nil {
+	var template models.Report
+	if err := db.Where("Reportid = ? AND recordstatus = 1", id).First(&template).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"code":    404,
@@ -326,8 +326,8 @@ func ExportJRXML(c *fiber.Ctx, db *gorm.DB) error {
 func PreviewReport(c *fiber.Ctx, db *gorm.DB) error {
 	id := c.Params("id")
 
-	var template models.ReportTemplate
-	if err := db.Where("reporttemplateid = ? AND recordstatus = 1", id).First(&template).Error; err != nil {
+	var template models.Report
+	if err := db.Where("Reportid = ? AND recordstatus = 1", id).First(&template).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"code":    404,
@@ -355,8 +355,8 @@ func PreviewReport(c *fiber.Ctx, db *gorm.DB) error {
 func ExecuteReport(c *fiber.Ctx, db *gorm.DB) error {
 	id := c.Params("id")
 
-	var template models.ReportTemplate
-	if err := db.Where("reporttemplateid = ? AND recordstatus = 1", id).First(&template).Error; err != nil {
+	var template models.Report
+	if err := db.Where("Reportid = ? AND recordstatus = 1", id).First(&template).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"code":    404,
@@ -388,7 +388,7 @@ func ExecuteReport(c *fiber.Ctx, db *gorm.DB) error {
 }
 
 // executeReportInternal handles the actual report execution
-func executeReportInternal(c *fiber.Ctx, db *gorm.DB, template *models.ReportTemplate, parameters map[string]interface{}, format string, isPreview bool) error {
+func executeReportInternal(c *fiber.Ctx, db *gorm.DB, template *models.Report, parameters map[string]interface{}, format string, isPreview bool) error {
 	// Get JasperReports server configuration from environment
 	reportURL := os.Getenv("REPORT_URL")
 	reportUser := os.Getenv("REPORT_USER")

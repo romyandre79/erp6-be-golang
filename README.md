@@ -411,3 +411,52 @@ Sends notification to ALL users in database.
 - `array_to_first` - Get first element from arrays
 - `format_message` - Format data into message
 - `format_array` - Format parallel arrays into lines
+
+---
+
+## SAP-Style Record & Schema Locking System
+
+Prevent concurrent editing conflicts with hard locks on database records and schema definitions.
+
+### 1. Record Locking (Data)
+
+**Purpose**: Prevent two users from editing the same data record simultaneously.
+
+**API Endpoints**:
+- `POST /api/admin/lock-record`
+  - Body: `{ "tablename": "invoice", "recordid": 123, "locktype": "edit" }`
+  - Returns: `200 OK` (Acquired) or `409 Conflict` (Locked by User X).
+- `POST /api/admin/unlock-record`
+  - Body: `{ "tablename": "invoice", "recordid": 123 }`
+
+**Logic**:
+- Locks are tracked in `recordlock` table.
+- A user can refresh their own lock.
+- **Auto-Expiration**: Locks automatically expire if not refreshed for **5 minutes**.
+- **Heartbeat**: Frontend automatically refreshes locks every 60 seconds.
+- Locks persist until explicitly unlocked or expired.
+
+### 2. Schema Locking (Metadata)
+
+**Purpose**: Prevent "Running" a form while it is being "Designed".
+
+**Logic**:
+- When **Form Designer** is opened:
+  1. Frontend calls `/lock-record` for `sys_menu` + `menuID`.
+  2. Database records the lock.
+- When **Runtime Menu** is accessed (`GET /api/admin/getmenu`):
+  1. Backend checks for lock on `sys_menu`.
+  2. If Locked:
+     - **By Other User**: BLOCKED (423 Locked).
+     - **By Same User**: BLOCKED (423 Locked) *unless* `design=true` query param is present.
+
+**State Matrix**:
+
+| Lock Status | Access Type | User | Result |
+| :--- | :--- | :--- | :--- |
+| Unlocked | Runtime | Any | ✅ Allowed |
+| Unlocked | Design | Any | ✅ Allowed (Locks it) |
+| Locked (User A) | Runtime | User B | ⛔ Blocked |
+| Locked (User A) | Runtime | User A | ⛔ Blocked (Safety) |
+| Locked (User A) | Design | User A | ✅ Allowed (`design=true`) |
+

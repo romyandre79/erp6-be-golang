@@ -44,8 +44,8 @@ func handleReportTemplate(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.
 	}
 
 	// Get report template
-	var template models.ReportTemplate
-	if err := db.Where("reporttemplateid = ? AND recordstatus = 1", templateID).First(&template).Error; err != nil {
+	var template models.Report
+	if err := db.Where("reportid = ? AND recordstatus = 1", templateID).First(&template).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"code":    404,
@@ -73,7 +73,7 @@ func handleReportTemplate(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.
 	// Store result in workflow context for next components
 	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
 	resultData := map[string]interface{}{
-		"templateid": template.ReportTemplateID,
+		"templateid": template.ReportID,
 		"reportname": template.ReportName,
 		"format":     outputFormat,
 		"parameters": paramMap,

@@ -74,8 +74,8 @@ type JRXMLReportElement struct {
 	Height int `xml:"height,attr"`
 }
 
-// ReportTemplate represents our internal JSON format
-type ReportTemplate struct {
+// Report represents our internal JSON format
+type Report struct {
 	PageWidth   int           `json:"pageWidth"`
 	PageHeight  int           `json:"pageHeight"`
 	Orientation string        `json:"orientation"`
@@ -116,7 +116,7 @@ func ConvertJRXMLToJSON(jrxmlContent string) (string, error) {
 		return "", fmt.Errorf("failed to parse JRXML: %w", err)
 	}
 
-	// Convert JRXML structure to our ReportTemplate
+	// Convert JRXML structure to our Report
 	template := convertJRXMLToTemplate(&jrxml)
 
 	jsonBytes, err := json.MarshalIndent(template, "", "  ")
@@ -129,7 +129,7 @@ func ConvertJRXMLToJSON(jrxmlContent string) (string, error) {
 
 // ConvertJSONToJRXML converts our JSON format to JRXML
 func ConvertJSONToJRXML(jsonContent string) (string, error) {
-	var template ReportTemplate
+	var template Report
 	if err := json.Unmarshal([]byte(jsonContent), &template); err != nil {
 		return "", fmt.Errorf("failed to parse JSON: %w", err)
 	}
@@ -146,8 +146,8 @@ func ConvertJSONToJRXML(jsonContent string) (string, error) {
 }
 
 // convertJRXMLToTemplate converts JRXML structure to our internal format
-func convertJRXMLToTemplate(jrxml *JRXMLReport) *ReportTemplate {
-	template := &ReportTemplate{
+func convertJRXMLToTemplate(jrxml *JRXMLReport) *Report {
+	template := &Report{
 		PageWidth:   jrxml.PageWidth,
 		PageHeight:  jrxml.PageHeight,
 		Orientation: jrxml.Orientation,
@@ -269,7 +269,7 @@ func convertBand(bandType string, jrxmlBand *JRXMLBand) ReportBand {
 }
 
 // convertTemplateToJRXML converts our internal format to JRXML structure
-func convertTemplateToJRXML(template *ReportTemplate) *JRXMLReport {
+func convertTemplateToJRXML(template *Report) *JRXMLReport {
 	jrxml := &JRXMLReport{
 		Name:         "Report",
 		PageWidth:    template.PageWidth,

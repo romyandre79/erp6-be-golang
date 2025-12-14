@@ -397,6 +397,8 @@ func DashboardSingleHandler(c *fiber.Ctx, db *gorm.DB) error {
 func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
 	userID := c.Locals("userid")
 	menuName := c.Query("menuname")
+	isDesign := c.Query("design") == "true"
+
 
 	if userID == nil {
 		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
@@ -404,16 +406,125 @@ func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
 
 	// --- STEP 4: Ambil hanya data menu yang dibolehkan ---
 	var menus models.Menuaccess
-	err := db.
-		Table("menuaccess").
-		Preload("Modules").
-		Where("menuaccess.menuname = ?", menuName).
-		Find(&menus).Error
-	if err != nil {
+	// Pre-fetch menu to get ID for lock check
+	if err := db.Where("menuname = ?", menuName).First(&menus).Error; err != nil {
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
+	}
+	
+	// CHECK SCHEMA LOCK
+	var lock models.Recordlock
+	err := db.Where("tablename = ? AND recordid = ?", "sys_menu", menus.Menuaccessid).First(&lock).Error
+	if err == nil {
+		// Found lock!
+		
+		// Check Expiry (5 minutes)
+		if time.Since(lock.Lockedat) > 5*time.Minute {
+			// Expired! Delete it and proceed
+			db.Delete(&lock)
+		} else {
+			currentUserID, _ := userID.(int)
+			
+			// 1. If locked by ANOTHER user -> BLOCK
+			if lock.Lockedby != currentUserID {
+				var lockingUser models.Useraccess
+				db.Where("useraccessid = ?", lock.Lockedby).First(&lockingUser)
+				return helpers.FailResponse(c, fiber.StatusLocked, "SCHEMA_LOCKED", 
+					fmt.Sprintf("This menu is currently being designed by %s since %s", 
+						lockingUser.Username, lock.Lockedat.Format("15:04")))
+			}
+	
+			// 2. If locked by ME but accessing RUNTIME (not design) -> BLOCK
+			if lock.Lockedby == currentUserID && !isDesign {
+				return helpers.FailResponse(c, fiber.StatusLocked, "SCHEMA_LOCKED", 
+					"You are currently editing this menu in Form Designer.")
+			}
+		}
+	}
+
+	// Continue loading menu modules
+	if err := db.Model(&menus).Association("Modules").Find(&menus.Modules); err != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MODULE_QUERY_FAILED", err.Error())
 	}
 
 	return helpers.SuccessResponse(c, "DATA RETRIEVED", menus)
+}
+
+func LockRecordHandler(c *fiber.Ctx, db *gorm.DB) error {
+	type LockRequest struct {
+		TableName string `json:"tablename"`
+		RecordID  int    `json:"recordid"`
+		LockType  string `json:"locktype"`
+	}
+	var req LockRequest
+	if err := c.BodyParser(&req); err != nil {
+		return helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_PAYLOAD", err.Error())
+	}
+
+	userID := c.Locals("userid").(int)
+	sessionID := c.Get("X-Session-ID", "")
+
+	// Check existing lock
+	var existingLock models.Recordlock
+	err := db.Where("tablename = ? AND recordid = ?", req.TableName, req.RecordID).First(&existingLock).Error
+	
+	if err == nil {
+		// Check Expiry (5 minutes)
+		if time.Since(existingLock.Lockedat) > 5*time.Minute {
+			// Expired! Delete it
+			db.Delete(&existingLock)
+		} else {
+			if existingLock.Lockedby == userID {
+				// Refresh
+				existingLock.Lockedat = time.Now()
+				db.Save(&existingLock)
+				return helpers.SuccessResponse(c, "LOCK_REFRESHED", nil)
+			}
+			// Locked by other
+			var lockingUser models.Useraccess
+			db.Where("useraccessid = ?", existingLock.Lockedby).First(&lockingUser)
+			return helpers.FailResponse(c, fiber.StatusConflict, "RECORD_LOCKED", 
+				fmt.Sprintf("Locked by %s", lockingUser.Username))
+		}
+	}
+
+	// Create Lock
+	lock := models.Recordlock{
+		Tablename: req.TableName,
+		Recordid:  req.RecordID,
+		Lockedby:  userID,
+		Locktype:  req.LockType,
+		Sessionid: sessionID,
+		Lockedat:  time.Now(),
+	}
+	if req.LockType == "" { lock.Locktype = "edit" }
+
+	if err := db.Create(&lock).Error; err != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "LOCK_FAILED", err.Error())
+	}
+	
+	return helpers.SuccessResponse(c, "LOCK_ACQUIRED", nil)
+}
+
+func UnlockRecordHandler(c *fiber.Ctx, db *gorm.DB) error {
+	type UnlockRequest struct {
+		TableName string `json:"tablename"`
+		RecordID  int    `json:"recordid"`
+	}
+	var req UnlockRequest
+	if err := c.BodyParser(&req); err != nil {
+		return helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_PAYLOAD", err.Error())
+	}
+
+	userID := c.Locals("userid").(int)
+
+	result := db.Where("tablename = ? AND recordid = ? AND lockedby = ?", 
+		req.TableName, req.RecordID, userID).Delete(&models.Recordlock{})
+	
+	if result.Error != nil {
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "UNLOCK_FAILED", result.Error.Error())
+	}
+
+	return helpers.SuccessResponse(c, "LOCK_RELEASED", nil)
 }
 
 func ExecuteTableOperationHandler(c *fiber.Ctx, db *gorm.DB) error {

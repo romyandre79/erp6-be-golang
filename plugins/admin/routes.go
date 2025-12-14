@@ -125,11 +125,11 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Delete("/db/areas/:id", func(c *fiber.Ctx) error { return DeleteAreaHandler(c, db) })
 
 		// Report Designer Routes
-		admin.Post("/report-templates", func(c *fiber.Ctx) error { return CreateReportTemplate(c, db) })
-		admin.Get("/report-templates", func(c *fiber.Ctx) error { return ListReportTemplates(c, db) })
-		admin.Get("/report-templates/:id", func(c *fiber.Ctx) error { return GetReportTemplate(c, db) })
-		admin.Put("/report-templates/:id", func(c *fiber.Ctx) error { return UpdateReportTemplate(c, db) })
-		admin.Delete("/report-templates/:id", func(c *fiber.Ctx) error { return DeleteReportTemplate(c, db) })
+		admin.Post("/report-templates", func(c *fiber.Ctx) error { return CreateReport(c, db) })
+		admin.Get("/report-templates", func(c *fiber.Ctx) error { return ListReports(c, db) })
+		admin.Get("/report-templates/:id", func(c *fiber.Ctx) error { return GetReport(c, db) })
+		admin.Put("/report-templates/:id", func(c *fiber.Ctx) error { return UpdateReport(c, db) })
+		admin.Delete("/report-templates/:id", func(c *fiber.Ctx) error { return DeleteReport(c, db) })
 		admin.Post("/report-templates/:id/preview", func(c *fiber.Ctx) error { return PreviewReport(c, db) })
 		admin.Post("/report-templates/:id/execute", func(c *fiber.Ctx) error { return ExecuteReport(c, db) })
 
@@ -139,6 +139,10 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 
 		// Scheduler Management
 		admin.Post("/scheduler/reload", func(c *fiber.Ctx) error { return ReloadSchedulerHandler(c, db) })
+
+		// Record Locking
+		admin.Post("/lock-record", func(c *fiber.Ctx) error { return LockRecordHandler(c, db) })
+		admin.Post("/unlock-record", func(c *fiber.Ctx) error { return UnlockRecordHandler(c, db) })
 	}
 
 	app.Get("/api/ws/notifications",

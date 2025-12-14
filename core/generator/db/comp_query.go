@@ -121,7 +121,8 @@ func handleQuery(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 		driver := GetDatabaseDriver(db) // Assuming this helper exists, check comp_table
 
 		// Copied from comp_table logic
-		if strings.HasPrefix(strings.ToLower(query), "insert") {
+		// Only attempt to get Last Insert ID if rows were actually affected
+		if result.RowsAffected > 0 && strings.HasPrefix(strings.ToLower(query), "insert") {
 			switch driver {
 			case "postgres":
 				db.Raw("SELECT LASTVAL()").Scan(&lastID)

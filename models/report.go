@@ -4,8 +4,8 @@ import (
 	"time"
 )
 
-type ReportTemplate struct {
-	ReportTemplateID int       `gorm:"column:reporttemplateid;primaryKey;autoIncrement" json:"reporttemplateid"`
+type Report struct {
+	ReportID int       `gorm:"column:reportid;primaryKey;autoIncrement" json:"reportid"`
 	ReportName       string    `gorm:"column:reportname;not null" json:"reportname"`
 	ReportDesc       string    `gorm:"column:reportdesc" json:"reportdesc"`
 	ReportCategory   string    `gorm:"column:reportcategory" json:"reportcategory"`
@@ -22,6 +22,6 @@ type ReportTemplate struct {
 	UpdateDate       time.Time `gorm:"column:updatedate" json:"updatedate"`
 }
 
-func (ReportTemplate) TableName() string {
-	return "reporttemplate"
+func (Report) TableName() string {
+	return "report"
 }
