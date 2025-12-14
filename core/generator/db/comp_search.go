@@ -290,6 +290,27 @@ func parseSearchParams(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB,
 			}
 		}
 	}
+
+	// Dynamic sorting from request (overrides workflow config)
+	if sortBy := c.FormValue("sortby"); sortBy != "" {
+		sp.Sort = sortBy
+	} else if sortBy := c.Query("sortby"); sortBy != "" {
+		sp.Sort = sortBy
+	}
+
+	if sortDir := c.FormValue("sortdir"); sortDir != "" {
+		// Validate sortdir to prevent SQL injection
+		sortDirLower := strings.ToLower(sortDir)
+		if sortDirLower == "asc" || sortDirLower == "desc" {
+			sp.Order = sortDirLower
+		}
+	} else if sortDir := c.Query("sortdir"); sortDir != "" {
+		sortDirLower := strings.ToLower(sortDir)
+		if sortDirLower == "asc" || sortDirLower == "desc" {
+			sp.Order = sortDirLower
+		}
+	}
+
 	return sp
 }
 
