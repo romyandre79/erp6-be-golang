@@ -460,3 +460,88 @@ Prevent concurrent editing conflicts with hard locks on database records and sch
 | Locked (User A) | Runtime | User A | ⛔ Blocked (Safety) |
 | Locked (User A) | Design | User A | ✅ Allowed (`design=true`) |
 
+
+Chart Component Usage Guide
+The application uses 
+ChartWrapper.vue
+ to render charts within the dynamic form system (
+FormRender.vue
+). It is built on top of vue-echarts and echarts.
+
+1. Schema Configuration
+To add a chart to a page or form, you need to define it in your JSON schema (or use the Form Designer to drag and drop a "Chart" component).
+
+Schema Structure
+{
+  "type": "chart",
+  "props": {
+    "key": "unique_chart_key",
+    "searchflow": "my_chart_data_flow",
+    "class": "w-full h-96",
+    "title": "Monthly Sales"
+  },
+  "children": [
+    // Optional: Filter inputs that will trigger data refresh
+    {
+      "type": "select",
+      "props": {
+        "key": "year",
+        "label": "Year",
+        "source": "get_years_flow"
+      }
+    }
+  ]
+}
+Key Props
+type: Must be "chart".
+props.searchflow: TEMPLATE FLOW name that the backend will execute to get chart data.
+props.key: Unique identifier for the component.
+children: (Optional) Input components (like selects, date pickers) placed inside the chart container. When their values change, the chart automatically refetches data.
+2. Backend Requirement
+The ChartWrapper expects the backend (via the specified searchflow) to return a complete ECharts option object.
+
+API Request
+The component sends a POST request to /api/admin/execute-flow with:
+
+flowname: The value of props.searchflow.
+menu: admin.
+search: true.
+Filters: Any values from the children inputs (e.g., year=2024).
+Expected API Response
+The backend flow must return a JSON response where data.data is the ECharts configuration.
+
+Example Golang/Backend Response:
+
+{
+  "code": 200,
+  "data": {
+    "data": {
+      "title": {
+        "text": "Sales Data"
+      },
+      "tooltip": {},
+      "xAxis": {
+        "data": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
+      },
+      "yAxis": {},
+      "series": [
+        {
+          "name": "Sales",
+          "type": "bar",
+          "data": [5, 20, 36, 10, 10, 20]
+        }
+      ]
+    }
+  }
+}
+3. How It Works
+FormRender encounters a node with type: "chart".
+It renders 
+ChartWrapper.vue
+.
+ChartWrapper mounts and calls 
+fetchData()
+.
+It calls the backend flow defined in searchflow.
+It applies the returned JSON directly to the <v-chart :option="chartOption" />.
+Use chart class in the schema to control height/width (default is h-96).
