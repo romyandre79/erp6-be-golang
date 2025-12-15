@@ -11,6 +11,7 @@ type Workflow struct {
 	Wfminstat    int8      `gorm:"column:wfminstat" json:"wfminstat"`
 	Wfmaxstat    int8      `gorm:"column:wfmaxstat" json:"wfmaxstat"`
 	Flow         string    `gorm:"column:flow" json:"flow"`
+	Moduleid     int       `gorm:"column:moduleid" json:"moduleid"`
 	Recordstatus int8      `gorm:"column:recordstatus" json:"recordstatus"`
 	Updatedate   time.Time `gorm:"column:updatedate" json:"updatedate"`
 }

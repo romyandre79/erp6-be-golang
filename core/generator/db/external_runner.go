@@ -3,14 +3,24 @@ package generator
 import (
 	"bytes"
 	"encoding/json"
+	"erp6-be-golang/core/configs"
 	"fmt"
 	"os/exec"
 )
 
 // ExternalPluginInput is the data structure sent to the plugin
 type ExternalPluginInput struct {
-	Params []WorkflowDetailResult `json:"params"`
-	// We can add more context here if needed, but Params is usually enough
+	Params   []WorkflowDetailResult `json:"params"`
+	DBConfig *DBConfig              `json:"db_config"`
+}
+
+type DBConfig struct {
+	Driver string `json:"driver"`
+	Host   string `json:"host"`
+	Port   string `json:"port"`
+	User   string `json:"user"`
+	Pass   string `json:"pass"`
+	Name   string `json:"name"`
 }
 
 // ExternalPluginOutput is the expected output from the plugin
@@ -54,8 +64,6 @@ func RunExternalPlugin(cmdPath string, ctx *WorkflowContext) error {
 		}
 	}
 
-
-
 	// 1. Use resolved parameters from workflow definition
 	for _, p := range params {
 		val := ResolveParam(ctx.FiberCtx, p.CompValue)
@@ -65,8 +73,19 @@ func RunExternalPlugin(cmdPath string, ctx *WorkflowContext) error {
 	// Note: Sections 2-4 (Query/Form/PostArgs discovery) removed to prevent
 	// parameters from previous nodes overwriting current node's parameters
 
+	// Prepare DB Config
+	dbConfig := &DBConfig{
+		Driver: configs.ConfigApps.DBDriver,
+		Host:   configs.ConfigApps.DBHost,
+		Port:   configs.ConfigApps.DBPort,
+		User:   configs.ConfigApps.DBUser,
+		Pass:   configs.ConfigApps.DBPass,
+		Name:   configs.ConfigApps.DBName,
+	}
+
 	input := ExternalPluginInput{
-		Params: params,
+		Params:   params,
+		DBConfig: dbConfig,
 	}
 
 	inputJson, err := json.Marshal(input)

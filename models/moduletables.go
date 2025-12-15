@@ -10,7 +10,7 @@ type ModuleTables struct {
 	CreatedAt      time.Time `gorm:"column:createdat;not null" json:"createdat"`
 
 	// Foreign key relationship (optional)
-	Module *Modules `gorm:"foreignKey:ModuleID;references:ModuleID" json:"module,omitempty"`
+	Module *Modules `gorm:"foreignKey:ModuleID;references:Moduleid" json:"module,omitempty"`
 }
 
 // TableName specifies the table name for GORM

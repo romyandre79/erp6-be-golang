@@ -131,8 +131,8 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 
 						whereStat += fmt.Sprintf("(%s BETWEEN '%s' AND '%s') ", left, start, end)
 					}
-				} else if strings.Contains(right, ":") {
-					key := strings.ReplaceAll(right, ":", "")
+				} else if strings.Contains(right, "$") {
+					key := strings.ReplaceAll(right, "$", "")
 					val := c.Query(key)
 					if val == "" {
 						val = c.FormValue(key)
@@ -144,7 +144,16 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 					} else if strings.Contains(data, "exist") {
 						whereStat += fmt.Sprintf("exist (%s)", left)
 					} else {
-						whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)
+						if strings.Contains(right, "$") {
+							key := strings.ReplaceAll(right, "$", "")
+							val := c.Query(key)
+							if val == "" {
+								val = c.FormValue(key)
+							}
+							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, val)
+						} else {
+							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)
+						}
 					}
 				}
 			} else {

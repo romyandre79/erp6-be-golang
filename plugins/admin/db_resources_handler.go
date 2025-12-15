@@ -19,17 +19,29 @@ func SaveRelationsHandler(c *fiber.Ctx, db *gorm.DB) error {
 	// Assuming bulk save for the entire canvas/project usually implies a "state save".
 	// But since this is a global table, we probably want to filter by project/diagram ID if that existed.
 	// Given the current simple schema, we'll assume we are saving ALL active relations or passing a list to upset.
-	
+
 	// WARNING: This implementation assumes we are saving specific relations.
 	// If the frontend sends the "entire list of relations to keep", we should potentially clear old ones.
 	// However, without a project ID, clearing "all" is dangerous if used by multiple things.
-	
+
 	// For now, let's implement UPSERT based on ID.
 	for i := range input {
 		if input[i].ID > 0 {
 			db.Save(&input[i])
 		} else {
-			db.Create(&input[i])
+			// Check for existing relation to avoid duplicates
+			var existing models.DbobjectRelation
+			err := db.Where("fromtableid = ? AND fromcolindex = ? AND totableid = ? AND tocolindex = ?",
+				input[i].FromTableID, input[i].FromColIndex, input[i].ToTableID, input[i].ToColIndex).First(&existing).Error
+
+			if err == nil {
+				// Found existing, update it
+				input[i].ID = existing.ID
+				db.Save(&input[i])
+			} else {
+				// Not found, create new
+				db.Create(&input[i])
+			}
 		}
 	}
 
@@ -49,7 +61,6 @@ func DeleteRelationHandler(c *fiber.Ctx, db *gorm.DB) error {
 	db.Delete(&models.DbobjectRelation{}, id)
 	return c.JSON(fiber.Map{"success": true})
 }
-
 
 // Same for Areas
 func SaveAreasHandler(c *fiber.Ctx, db *gorm.DB) error {

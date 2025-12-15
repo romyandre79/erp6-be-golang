@@ -28,7 +28,9 @@ type ModuleManifest struct {
 	Widgets       []WidgetDefinition     `json:"widgets"`
 	Workflows     []WorkflowDefinition   `json:"workflows"`
 	Tables        []TableDefinition      `json:"tables"`
+	GroupMenus    []GroupMenuDefinition  `json:"groupmenus"`
 }
+
 
 type MenuAccessDefinition struct {
 	Menuname       string `json:"menuname"`
@@ -60,6 +62,7 @@ type WorkflowDefinition struct {
 	Wfminstat    int8   `json:"wfminstat"`
 	Wfmaxstat    int8   `json:"wfmaxstat"`
 	Flow         string `json:"flow"`
+	Moduleid     int    `json:"moduleid"`
 	Recordstatus int8   `json:"recordstatus"`
 }
 
@@ -68,6 +71,7 @@ type TableDefinition struct {
 	Columns     []ColumnDefinition     `json:"columns"`
 	Indexes     []IndexDefinition      `json:"indexes"`
 	ForeignKeys []ForeignKeyDefinition `json:"foreignKeys"`
+	Data        []map[string]interface{} `json:"data,omitempty"`
 }
 
 type ColumnDefinition struct {
@@ -96,6 +100,18 @@ type ForeignKeyDefinition struct {
 	OnDelete string `json:"onDelete"`
 	OnUpdate string `json:"onUpdate"`
 }
+
+type GroupMenuDefinition struct {
+	Menuname   string `json:"menuname"`
+	Isread     int    `json:"isread"`
+	Iswrite    int    `json:"iswrite"`
+	Ispost     int    `json:"ispost"`
+	Isreject   int    `json:"isreject"`
+	Isupload   int    `json:"isupload"`
+	Isdownload int    `json:"isdownload"`
+	Ispurge    int    `json:"ispurge"`
+}
+
 
 // UploadModulePackageHandler handles module package upload (ZIP file)
 func UploadModulePackageHandler(c *fiber.Ctx, db *gorm.DB) error {
@@ -229,6 +245,8 @@ func installModuleFromManifest(c *fiber.Ctx, db *gorm.DB, manifest ModuleManifes
 	}
 
 	// 5. Insert menu access entries
+	// 5. Insert menu access entries
+	menuMap := make(map[string]int)
 	for _, menuDef := range manifest.Menuaccess {
 		menuAccess := models.Menuaccess{
 			Menuname:       menuDef.Menuname,
@@ -248,6 +266,33 @@ func installModuleFromManifest(c *fiber.Ctx, db *gorm.DB, manifest ModuleManifes
 		if err := tx.Create(&menuAccess).Error; err != nil {
 			tx.Rollback()
 			return helpers.FailResponse(c, fiber.StatusInternalServerError, "CREATE_MENU_FAILED", err.Error())
+		}
+		menuMap[menuAccess.Menuname] = menuAccess.Menuaccessid
+	}
+
+	// 5b. Insert GroupMenu for groupaccessid = 2
+	for _, gmDef := range manifest.GroupMenus {
+		if menuID, ok := menuMap[gmDef.Menuname]; ok {
+			groupMenu := models.Groupmenu{
+				Groupaccessid: 2, // Hardcoded as per requirement
+				Menuaccessid:  menuID,
+				Isread:        gmDef.Isread,
+				Iswrite:       gmDef.Iswrite,
+				Ispost:        gmDef.Ispost,
+				Isreject:      gmDef.Isreject,
+				Isupload:      gmDef.Isupload,
+				Isdownload:    gmDef.Isdownload,
+				Ispurge:       gmDef.Ispurge,
+				Updatedate:    time.Now(),
+			}
+
+			// Check existence first to be safe, though usually new module means new menus
+			// But skipping check for simplicity in bulk insert scenario, usually safer to just create
+			if err := tx.Create(&groupMenu).Error; err != nil {
+				// Log error but continue? Or fail? Fail is safer to ensure consistency
+				tx.Rollback()
+				return helpers.FailResponse(c, fiber.StatusInternalServerError, "CREATE_GROUPMENU_FAILED", err.Error())
+			}
 		}
 	}
 
@@ -279,23 +324,13 @@ func installModuleFromManifest(c *fiber.Ctx, db *gorm.DB, manifest ModuleManifes
 			Wfminstat:    wfDef.Wfminstat,
 			Wfmaxstat:    wfDef.Wfmaxstat,
 			Flow:         wfDef.Flow,
+			Moduleid:     wfDef.Moduleid,
 			Recordstatus: wfDef.Recordstatus,
 			Updatedate:   time.Now(),
 		}
 		if err := tx.Create(&workflow).Error; err != nil {
 			tx.Rollback()
 			return helpers.FailResponse(c, fiber.StatusInternalServerError, "CREATE_WORKFLOW_FAILED", err.Error())
-		}
-
-		// Track workflow in moduleworkflow
-		moduleWorkflow := models.ModuleWorkflow{
-			ModuleID:   moduleID,
-			WorkflowID: workflow.Workflowid,
-			CreatedAt:  time.Now(),
-		}
-		if err := tx.Create(&moduleWorkflow).Error; err != nil {
-			tx.Rollback()
-			return helpers.FailResponse(c, fiber.StatusInternalServerError, "TRACK_WORKFLOW_FAILED", err.Error())
 		}
 	}
 
@@ -319,6 +354,16 @@ func installModuleFromManifest(c *fiber.Ctx, db *gorm.DB, manifest ModuleManifes
 		if err := tx.Create(&moduleTable).Error; err != nil {
 			tx.Rollback()
 			return helpers.FailResponse(c, fiber.StatusInternalServerError, "TRACK_TABLE_FAILED", err.Error())
+		}
+	}
+
+	// 8b. Insert table data
+	for _, tableDef := range manifest.Tables {
+		if len(tableDef.Data) > 0 {
+			if err := tx.Table(tableDef.TableName).CreateInBatches(tableDef.Data, 100).Error; err != nil {
+				tx.Rollback()
+				return helpers.FailResponse(c, fiber.StatusInternalServerError, "INSERT_DATA_FAILED", fmt.Sprintf("Table: %s, Error: %s", tableDef.TableName, err.Error()))
+			}
 		}
 	}
 
@@ -517,30 +562,16 @@ func UninstallModuleHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "DELETE_MODULE_TABLES_FAILED", err.Error())
 	}
 
-	// 3. Get and delete workflows
-	var moduleWorkflows []models.ModuleWorkflow
-	tx.Where("moduleid = ?", moduleID).Find(&moduleWorkflows)
+	// 3. Delete workflows associated with module
+	var workflows []models.Workflow
+	tx.Where("moduleid = ?", moduleID).Find(&workflows)
 
-	var workflowIDs []int
-	for _, mw := range moduleWorkflows {
-		workflowIDs = append(workflowIDs, mw.WorkflowID)
-	}
-
-	if len(workflowIDs) > 0 {
-		// Delete workflows
-		if err := tx.Where("workflowid IN ?", workflowIDs).Delete(&models.Workflow{}).Error; err != nil {
-			tx.Rollback()
-			return helpers.FailResponse(c, fiber.StatusInternalServerError, "DELETE_WORKFLOWS_FAILED", err.Error())
-		}
-	}
-
-	// 4. Delete moduleworkflow records
-	if err := tx.Where("moduleid = ?", moduleID).Delete(&models.ModuleWorkflow{}).Error; err != nil {
+	if err := tx.Where("moduleid = ?", moduleID).Delete(&models.Workflow{}).Error; err != nil {
 		tx.Rollback()
-		return helpers.FailResponse(c, fiber.StatusInternalServerError, "DELETE_MODULE_WORKFLOWS_FAILED", err.Error())
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "DELETE_WORKFLOWS_FAILED", err.Error())
 	}
 
-	// 5. Delete widgets (cascade via moduleid foreign key, but explicit delete for clarity)
+	// 4. Delete widgets (cascade via moduleid foreign key, but explicit delete for clarity)
 	if err := tx.Where("moduleid = ?", moduleID).Delete(&models.Widget{}).Error; err != nil {
 		tx.Rollback()
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "DELETE_WIDGETS_FAILED", err.Error())
@@ -568,7 +599,7 @@ func UninstallModuleHandler(c *fiber.Ctx, db *gorm.DB) error {
 		"modulename":      module.Modulename,
 		"tables_dropped":  dropTables,
 		"tables_count":    len(moduleTables),
-		"workflows_count": len(workflowIDs),
+		"workflows_count": len(workflows),
 	})
 }
 
@@ -606,8 +637,7 @@ func GetModuleDetailsHandler(c *fiber.Ctx, db *gorm.DB) error {
 	// Get workflows
 	var workflows []models.Workflow
 	db.Table("workflow").
-		Joins("JOIN moduleworkflow ON workflow.workflowid = moduleworkflow.workflowid").
-		Where("moduleworkflow.moduleid = ?", moduleID).
+		Where("moduleid = ?", moduleID).
 		Find(&workflows)
 
 	// Get tables
@@ -732,8 +762,7 @@ func ExportModuleHandler(c *fiber.Ctx, db *gorm.DB) error {
 	// Get workflows
 	var workflows []models.Workflow
 	db.Table("workflow").
-		Joins("JOIN moduleworkflow ON workflow.workflowid = moduleworkflow.workflowid").
-		Where("moduleworkflow.moduleid = ?", moduleID).
+		Where("moduleid = ?", moduleID).
 		Find(&workflows)
 
 	var workflowDefs []WorkflowDefinition
@@ -744,6 +773,7 @@ func ExportModuleHandler(c *fiber.Ctx, db *gorm.DB) error {
 			Wfminstat:    wf.Wfminstat,
 			Wfmaxstat:    wf.Wfmaxstat,
 			Flow:         wf.Flow,
+			Moduleid:     wf.Moduleid,
 			Recordstatus: wf.Recordstatus,
 		})
 	}
@@ -755,11 +785,36 @@ func ExportModuleHandler(c *fiber.Ctx, db *gorm.DB) error {
 
 	var tableDefs []TableDefinition
 	for _, mt := range moduleTables {
-		// Create a basic table definition with just the name
-		// Users should manually add column definitions if needed
-		tableDefs = append(tableDefs, TableDefinition{
-			TableName: mt.NameTable,
-			Columns:   []ColumnDefinition{}, // Empty - user must define manually
+		// Extract full table schema and data
+		tableDef, err := extractTableSchema(db, mt.NameTable)
+		if err != nil {
+			return helpers.FailResponse(c, fiber.StatusInternalServerError, "EXTRACT_SCHEMA_FAILED", fmt.Sprintf("Table: %s, Error: %s", mt.NameTable, err.Error()))
+		}
+		tableDefs = append(tableDefs, *tableDef)
+	}
+
+	// Get GroupMenu data for groupaccessid = 2
+	var groupMenus []struct {
+		models.Groupmenu
+		Menuname string
+	}
+	db.Table("groupmenu").
+		Select("groupmenu.*, menuaccess.menuname").
+		Joins("JOIN menuaccess ON groupmenu.menuaccessid = menuaccess.menuaccessid").
+		Where("groupmenu.groupaccessid = ? AND menuaccess.moduleid = ?", 2, moduleID).
+		Scan(&groupMenus)
+
+	var groupMenuDefs []GroupMenuDefinition
+	for _, gm := range groupMenus {
+		groupMenuDefs = append(groupMenuDefs, GroupMenuDefinition{
+			Menuname:   gm.Menuname,
+			Isread:     gm.Isread,
+			Iswrite:    gm.Iswrite,
+			Ispost:     gm.Ispost,
+			Isreject:   gm.Isreject,
+			Isupload:   gm.Isupload,
+			Isdownload: gm.Isdownload,
+			Ispurge:    gm.Ispurge,
 		})
 	}
 
@@ -775,6 +830,7 @@ func ExportModuleHandler(c *fiber.Ctx, db *gorm.DB) error {
 		Widgets:       widgetDefs,
 		Workflows:     workflowDefs,
 		Tables:        tableDefs,
+		GroupMenus:    groupMenuDefs,
 	}
 
 	// Convert to JSON
@@ -852,4 +908,86 @@ func ExportModuleHandler(c *fiber.Ctx, db *gorm.DB) error {
 	c.Set("Content-Type", "application/zip")
 	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", zipFileName))
 	return c.Send(zipData)
+}
+
+// extractTableSchema reverses engineer table schema and data
+func extractTableSchema(db *gorm.DB, tableName string) (*TableDefinition, error) {
+	var columns []ColumnDefinition
+	var foreignKeys []ForeignKeyDefinition
+	var indexes []IndexDefinition
+
+	// 1. Get Columns
+	// Note: This is a simplified extraction relative to the full reverse engineer
+	// We want raw SQL types suitable for CREATE TABLE
+	driver := db.Dialector.Name()
+	var query string
+
+	type ColumnInfo struct {
+		ColumnName    string
+		DataType      string
+		IsNullable    string
+		ColumnKey     string
+		ColumnDefault *string
+		Extra         string
+		MaxLength     *int
+	}
+	var colInfos []ColumnInfo
+
+	if driver == "mysql" {
+		query = `
+			SELECT 
+				COLUMN_NAME as column_name, 
+				DATA_TYPE as data_type, 
+				IS_NULLABLE as is_nullable, 
+				COLUMN_KEY as column_key, 
+				COLUMN_DEFAULT as column_default, 
+				EXTRA as extra,
+				CHARACTER_MAXIMUM_LENGTH as max_length
+			FROM INFORMATION_SCHEMA.COLUMNS 
+			WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? 
+			ORDER BY ORDINAL_POSITION`
+		
+		if err := db.Raw(query, tableName).Scan(&colInfos).Error; err != nil {
+			return nil, err
+		}
+	} else {
+		// Fallback for other drivers (simplified) - reusing GORM migrator if possible would be better but complex
+		// For now implementing MySQL support as primary requested context
+		return nil, fmt.Errorf("schema export currently supports MySQL only")
+	}
+
+	for _, info := range colInfos {
+		col := ColumnDefinition{
+			Name:          info.ColumnName,
+			Type:          info.DataType,
+			Nullable:      info.IsNullable == "YES",
+			PrimaryKey:    strings.Contains(info.ColumnKey, "PRI"),
+			AutoIncrement: strings.Contains(info.Extra, "auto_increment"),
+			Unique:        strings.Contains(info.ColumnKey, "UNI"),
+		}
+
+		if info.MaxLength != nil {
+			col.Length = *info.MaxLength
+		}
+
+		if info.ColumnDefault != nil {
+			col.Default = *info.ColumnDefault
+		}
+
+		columns = append(columns, col)
+	}
+
+	// 2. Get Data
+	var data []map[string]interface{}
+	if err := db.Table(tableName).Find(&data).Error; err != nil {
+		return nil, err
+	}
+
+	return &TableDefinition{
+		TableName:   tableName,
+		Columns:     columns,
+		ForeignKeys: foreignKeys, // TODO: Implement FK extraction if needed
+		Indexes:     indexes,     // TODO: Implement Index extraction if needed
+		Data:        data,
+	}, nil
 }
