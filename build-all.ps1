@@ -6,10 +6,10 @@
 $ErrorActionPreference = "Stop"
 
 $targets = @(
-    #@{GOOS="darwin"; GOARCH="amd64"; OUT="../erp6-be-golang-dist/capella-erp6-be-darwin-amd64"}   # macOS Intel
-    #@{GOOS="darwin"; GOARCH="arm64"; OUT="../erp6-be-golang-dist/capella-erp6-be-darwin-arm64"}   # macOS ARM (M1/M2/M3)
-    #@{GOOS="linux";  GOARCH="amd64"; OUT="../erp6-be-golang-dist/capella-erp6-be-linux-amd64"}    # Linux Intel
-    #@{GOOS="linux";  GOARCH="arm64"; OUT="../erp6-be-golang-dist/capella-erp6-be-linux-arm64"}    # Linux ARM
+    #@{GOOS = "darwin"; GOARCH = "amd64"; OUT = "../erp6-be-golang-dist/capella-erp6-be-darwin-amd64" }   # macOS Intel
+    #@{GOOS = "darwin"; GOARCH = "arm64"; OUT = "../erp6-be-golang-dist/capella-erp6-be-darwin-arm64" }   # macOS ARM (M1/M2/M3)
+    #@{GOOS = "linux"; GOARCH = "amd64"; OUT = "../erp6-be-golang-dist/capella-erp6-be-linux-amd64" }    # Linux Intel
+    #@{GOOS = "linux"; GOARCH = "arm64"; OUT = "../erp6-be-golang-dist/capella-erp6-be-linux-arm64" }    # Linux ARM
     @{GOOS = "windows"; GOARCH = "amd64"; OUT = "../erp6-be-golang-dist/capella-erp6-be-windows-amd64.exe" } # Windows
 )
 

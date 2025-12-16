@@ -33,7 +33,7 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 		message     string
 		title       = "Notification"
 		docNo       string
-		messageType = "notification" // Default to notification, can be "chat" or "notification"
+		messageType = "notification" // Default to notification
 	)
 
 	// Extract parameters from workflow
@@ -101,6 +101,13 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 					}
 				}
 			}
+		}
+	}
+
+	// If sendTo is still 0, look for authenticated user in Locals
+	if sendTo == 0 {
+		if uid, ok := c.Locals("userid").(int); ok && uid > 0 {
+			sendTo = uid
 		}
 	}
 
@@ -229,8 +236,7 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 		Description:  message,
 		Docno:        docNo,
 		Isread:       0,
-		// Tododate might be auto-set by DB or GORM hook? Usually it is.
-		// If not, we might need to set it. But notification.go didn't set it.
+		Tododate:     time.Now(), // Explicitly set time to ensure it's in the JSON
 	}
 
 	if err := db.Create(&todo).Error; err != nil {
@@ -240,13 +246,15 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 
 	// Broadcast via WS if GlobalHub is available
 	if ws.GlobalHub != nil {
-		payload, err := json.Marshal(map[string]interface{}{
+		payloadMap := map[string]interface{}{
 			"type": "notification",
 			"data": todo,
-		})
+		}
+		
+		payload, err := json.Marshal(payloadMap)
 		if err == nil {
 			ws.GlobalHub.SendToUser(sendTo, payload)
-			fmt.Printf("[SendMessage] Notification sent via WebSocket to user %d\n", sendTo)
+			fmt.Printf("[SendMessage] Notification sent via WebSocket to user %d. Payload: %s\n", sendTo, string(payload))
 		} else {
 			// Log error?
 			fmt.Printf("Error marshaling notification payload: %v\n", err)

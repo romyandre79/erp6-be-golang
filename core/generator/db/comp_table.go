@@ -39,7 +39,25 @@ func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 		}
 	}
 
-	listOldParam := strings.Split(param, ",")
+	// parse params respecting quotes
+	var listOldParam []string
+	var currentParam strings.Builder
+	inQuote := false
+	for _, r := range param {
+		if r == '\'' {
+			inQuote = !inQuote
+			currentParam.WriteRune(r)
+		} else if r == ',' && !inQuote {
+			listOldParam = append(listOldParam, strings.TrimSpace(currentParam.String()))
+			currentParam.Reset()
+		} else {
+			currentParam.WriteRune(r)
+		}
+	}
+	if currentParam.Len() > 0 {
+		listOldParam = append(listOldParam, strings.TrimSpace(currentParam.String()))
+	}
+
 	postData := map[string]string{}
 
 	// ambil semua data POST
@@ -55,11 +73,23 @@ func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 	for _, key := range listOldParam {
 		if strings.Contains(key, "=") {
 			parts := strings.SplitN(key, "=", 2)
-			val := c.Query(parts[1])
-			if val == "" {
-				val = c.FormValue(parts[1])
+			valRaw := strings.TrimSpace(parts[1])
+
+			// Strip surrounding quotes if present
+			if len(valRaw) >= 2 && strings.HasPrefix(valRaw, "'") && strings.HasSuffix(valRaw, "'") {
+				valRaw = valRaw[1 : len(valRaw)-1]
 			}
-			newParam[parts[0]] = val
+
+			if strings.Contains(valRaw, "$") {
+				lookupKey := strings.ReplaceAll(valRaw, "$", "")
+				val := c.Query(lookupKey)
+				if val == "" {
+					val = c.FormValue(lookupKey)
+				}
+				newParam[parts[0]] = val
+			} else {
+				newParam[parts[0]] = valRaw
+			}
 		} else {
 			if val, ok := postData[key]; ok {
 				newParam[key] = val

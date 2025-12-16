@@ -48,6 +48,10 @@ type Config struct {
 	ReportTime            string
 	WriteBufferSize       string
 	ExternalComponentPath string
+	IsHttps               string
+	SslCert               string
+	SslKey                string
+	ChatMaxFileSize       string
 }
 
 var ConfigApps *Config
@@ -100,6 +104,10 @@ func LoadConfig() {
 		ReportTime:            getEnv("REPORT_TIME", ""),
 		WriteBufferSize:       getEnv("WRITE_BUFFER_SIZE", ""),
 		ExternalComponentPath: getEnv("EXTERNAL_COMPONENT_PATH", "./public/plugins"),
+		IsHttps:               getEnv("IS_HTTPS", "false"),
+		SslCert:               getEnv("SSL_CERT", ""),
+		SslKey:                getEnv("SSL_KEY", ""),
+		ChatMaxFileSize:       getEnv("CHAT_MAX_FILE_SIZE", "10485760"), // Default 10MB
 	}
 
 	// check .env details
@@ -141,6 +149,11 @@ func LoadConfig() {
 	helpers.IsEmptyLog(ConfigApps.ReportTime, "REPORT_TIME", true)
 	helpers.IsEmptyLog(ConfigApps.WriteBufferSize, "WRITE_BUFFER_SIZE", true)
 	helpers.IsEmptyLog(ConfigApps.ExternalComponentPath, "EXTERNAL_COMPONENT_PATH", true)
+	helpers.IsEmptyLog(ConfigApps.IsHttps, "IS_HTTPS", true)
+	if ConfigApps.IsHttps == "true" {
+		helpers.IsEmptyLog(ConfigApps.SslCert, "SSL_CERT", true)
+		helpers.IsEmptyLog(ConfigApps.SslKey, "SSL_KEY", true)
+	}
 }
 
 func getEnv(key, fallback string) string {

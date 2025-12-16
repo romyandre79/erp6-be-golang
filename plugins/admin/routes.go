@@ -102,10 +102,6 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Post("/notifications/:id/read", func(c *fiber.Ctx) error { return MarkAsRead(c, db) })
 		admin.Post("/notifications/send", func(c *fiber.Ctx) error { return SendNotification(c, db) })
 
-		// Chat Routes
-		admin.Get("/users/list", func(c *fiber.Ctx) error { return GetUserListHandler(c, db) })
-		// Chat Routes
-		admin.Get("/users/list", func(c *fiber.Ctx) error { return GetUserListHandler(c, db) })
 		admin.Get("/chat/history", func(c *fiber.Ctx) error { return GetChatHistoryHandler(c, db) })
 
 		// DB Backup/Restore

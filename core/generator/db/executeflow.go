@@ -500,7 +500,7 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 	}
 
 	// Handle Decision flow
-	if strings.EqualFold(component.Name, "Decision") {
+	if strings.EqualFold(component.Name, "Decision") || strings.EqualFold(component.Name, "auth") {
 		var outputs IO
 		if ctx.DecisionResult {
 			outputs = component.Outputs["output_1"]
@@ -865,6 +865,11 @@ func resolveVariable(c *fiber.Ctx, key string) string {
 				}
 			}
 		}
+	}
+	
+	// 4. Check Locals (auth context etc)
+	if v := c.Locals(key); v != nil {
+		return fmt.Sprintf("%v", v)
 	}
 	
 	// Return original key if not found

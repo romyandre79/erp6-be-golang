@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"erp6-be-golang/core/ws"
 	"erp6-be-golang/models"
+	"time"
 
 	"log"
 
@@ -15,7 +16,7 @@ import (
 // Message types
 type WsPayload struct {
 	Type     string          `json:"type"`
-	TargetID int             `json:"target_id,omitempty"` // UserID to send to
+	TargetID int             `json:"targetid"` // UserID to send to
 	Data     json.RawMessage `json:"data"`
 }
 
@@ -62,10 +63,11 @@ func WebSocketHandler(c *websocket.Conn) {
 				var dataMap map[string]interface{}
 				if err := json.Unmarshal(payload.Data, &dataMap); err == nil {
 					if text, ok := dataMap["text"].(string); ok {
+						attachment, _ := dataMap["attachment"].(string)
 						// Get DB instance from somewhere - we need to pass it
 						// For now, use a global or inject it. Let's use a package-level var.
 						if GlobalDB != nil {
-							go SaveChatMessage(GlobalDB, useraccessid, payload.TargetID, text)
+							go SaveChatMessage(GlobalDB, useraccessid, payload.TargetID, text, attachment)
 						}
 					}
 				}
@@ -74,7 +76,7 @@ func WebSocketHandler(c *websocket.Conn) {
 			// Let's re-wrap to ensure sender is known
 			outData := map[string]interface{}{
 				"type":      payload.Type,
-				"sender_id": useraccessid,
+				"senderid": useraccessid,
 				"data":      payload.Data,
 			}
 			outBytes, _ := json.Marshal(outData)
@@ -152,4 +154,10 @@ func SendNotification(c *fiber.Ctx, db *gorm.DB) error {
 	ws.GlobalHub.SendToUser(req.ReceiverID, payload)
 
 	return c.JSON(fiber.Map{"status": "success", "data": todo})
+	ws.GlobalHub.SendToUser(req.ReceiverID, payload)
+
+	return c.JSON(fiber.Map{"status": "success", "data": todo})
 }
+
+
+

@@ -67,6 +67,22 @@ func RunExternalPlugin(cmdPath string, ctx *WorkflowContext) error {
 	// 1. Use resolved parameters from workflow definition
 	for _, p := range params {
 		val := ResolveParam(ctx.FiberCtx, p.CompValue)
+		
+		// Fallback: If value is empty, try to resolve by InputName
+		if val == "" {
+			val = ResolveParam(ctx.FiberCtx, p.InputName)
+			// Double check: ResolveParam returns "$"+key if not found.
+			// If it returns "$"+InputName, it means it wasn't found.
+			// But maybe we want to check raw values?
+			// Actually ResolveParam calls resolveVariable which checks Form/Query/Locals
+			
+			// If ResolveParam returned "$"+p.InputName, then it truly wasn't found.
+			// But we only want to use it if it WAS found (i.e. not equal to "$"+InputName)
+			if val == "$"+p.InputName {
+				val = "" // Revert to empty if not found
+			}
+		}
+
 		upsertParam(p.InputName, val)
 	}
 
