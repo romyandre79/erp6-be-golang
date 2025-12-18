@@ -15,7 +15,7 @@ It handles the execution of visual workflow diagrams created in the frontend des
 
 2. EXECUTION FLOW:
    ExecuteFlow() → InternalFlow() → Component Handler → InternalFlow() (recursive)
-   
+
    - ExecuteFlow: Entry point, loads workflow, initializes state, starts execution
    - InternalFlow: Executes a single node and recursively calls next connected nodes
    - Component Handlers: Registered functions that implement specific node logic
@@ -94,13 +94,13 @@ type WorkflowDetailResult struct {
 // An array of these is stored in c.Locals("wfEngine") to maintain execution history.
 // This allows subsequent nodes to access results from previous nodes via ResolveParam().
 type WorkflowEngine struct {
-	WorkflowId    int     `json:"workflowId"`    // ID of the workflow being executed
-	NodeId        int     `json:"nodeId"`        // ID of the specific node instance
-	ComponentName string  `json:"componentName"` // Type of component (e.g., "AI", "Scraper")
-	DataInputNode any     `json:"input"`         // Input parameters sent to this node
-	ResultNode    any     `json:"result"`        // Output/result from this node (accessible via $variable)
-	Success       bool    `json:"success"`       // Whether execution succeeded
-	ExecutionTime float64 `json:"executionTime"` // Execution time in milliseconds
+	WorkflowId    int     `json:"workflowId"`      // ID of the workflow being executed
+	NodeId        int     `json:"nodeId"`          // ID of the specific node instance
+	ComponentName string  `json:"componentName"`   // Type of component (e.g., "AI", "Scraper")
+	DataInputNode any     `json:"input"`           // Input parameters sent to this node
+	ResultNode    any     `json:"result"`          // Output/result from this node (accessible via $variable)
+	Success       bool    `json:"success"`         // Whether execution succeeded
+	ExecutionTime float64 `json:"executionTime"`   // Execution time in milliseconds
 	Error         string  `json:"error,omitempty"` // Error message if failed
 }
 
@@ -193,18 +193,18 @@ func GetWorkflowDetail(db *gorm.DB, componentName string, workflowID int, nodeID
 // It initializes the wfEngine array to begin tracking execution.
 func handleStart(c *fiber.Ctx) error {
 	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
-	
+
 	// Load workflow parameters and their values
 	flowName := c.FormValue("flowname")
 	params := make(map[string]interface{})
-	
+
 	// First, load from workflow definition (defaults)
 	if flowName != "" {
 		// Check if db is available
 		dbInterface := c.Locals("db")
 		if dbInterface != nil {
 			db := dbInterface.(*gorm.DB)
-			
+
 			// Get workflow parameters definition
 			var wfParams []models.Workflowparameter
 			if err := db.
@@ -213,7 +213,7 @@ func handleStart(c *fiber.Ctx) error {
 				Joins("INNER JOIN workflow b ON b.workflowid = a.workflowid").
 				Where("b.wfname = ?", flowName).
 				Scan(&wfParams).Error; err == nil {
-				
+
 				// Load parameter values from form or use default
 				for _, p := range wfParams {
 					val := c.FormValue(p.Parametername)
@@ -225,14 +225,14 @@ func handleStart(c *fiber.Ctx) error {
 			}
 		}
 	}
-	
+
 	// Then, override with parameters from parent workflow (scopedParams takes priority)
 	if scopedParams, ok := c.Locals("scopedParams").(map[string]interface{}); ok {
 		for k, v := range scopedParams {
 			params[k] = v
 		}
 	}
-	
+
 	// Load conversation state from file (for AI assistant continuity)
 	if userID, ok := c.Locals("userid").(int); ok && userID > 0 {
 		conversationFile := fmt.Sprintf("./tmp/ai_conversations/%d.json", userID)
@@ -246,10 +246,10 @@ func handleStart(c *fiber.Ctx) error {
 			}
 		}
 	}
-	
+
 	// Debug: Log what parameters we're setting
 	fmt.Printf("[Start Node] Parameters loaded: %+v\n", params)
-	
+
 	// Make parameters available to subsequent nodes
 	wfEngine = append(wfEngine, WorkflowEngine{
 		DataInputNode: "",
@@ -409,7 +409,7 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 
 	// Broadcast node start via WebSocket
 	broadcastNodeUpdate(c, "node_start", workflowId, nodeId, component.Name, nil, nil, 0, "")
-	
+
 	// Small delay to allow frontend to process the event and update UI
 	// This ensures fast-executing components (like Transform) show the "running" state
 	time.Sleep(50 * time.Millisecond)
@@ -434,10 +434,11 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 
 	// Create context for the component
 	ctx := &WorkflowContext{
-		FiberCtx: c,
-		DB:       db,
-		Params:   workflowDetailResult,
-		Search:   search,
+		FiberCtx:         c,
+		DB:               db,
+		Params:           workflowDetailResult,
+		Search:           search,
+		CurrentComponent: component,
 	}
 
 	// Handle special cases for context population
@@ -491,12 +492,20 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		wfEngine[len(wfEngine)-1].Success = true
 		wfEngine[len(wfEngine)-1].ExecutionTime = execTime
 		c.Locals("wfEngine", wfEngine)
-		
+
 		// Broadcast node completion for external plugins
 		broadcastNodeUpdate(c, "node_complete", workflowId, nodeId, component.Name, inputParams, stepResult, execTime, "")
 	} else {
 		// Component didn't append, add our own tracking
 		appendStepResult(c, workflowId, nodeId, component.Name, inputParams, stepResult, true, execTime, "")
+	}
+
+	// Check if navigation should be skipped (handled manually by component)
+	if skip, ok := c.Locals("skipNavigation").(bool); ok && skip {
+		// Reset flag to avoid affecting parent calls if context is reused strangely
+		// (though in recursion, we return immediately, so this is mostly for safety)
+		c.Locals("skipNavigation", false)
+		return nil
 	}
 
 	// Handle Decision flow
@@ -624,7 +633,7 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool, params
 		c.Locals("scopedParams", params)
 	}
 	defer c.Locals("scopedParams", originalScopedParams)
-	
+
 	// Store db in locals for component access
 	c.Locals("db", db)
 
@@ -740,7 +749,7 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool, params
 	if !search {
 		// Check if we're in a nested workflow (called from Workflow component)
 		isNested, _ := c.Locals("nestedWorkflow").(bool)
-		
+
 		if isNested {
 			// Nested workflow - reuse the existing transaction
 			tx = db
@@ -798,8 +807,9 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool, params
 // 2. Check POST form values (c.FormValue)
 // 3. Check GET query parameters (c.Query)
 // 4. Check previous node results in wfEngine (searches backwards for latest match)
-//    - Checks top-level keys in ResultNode
-//    - Checks nested "data" object in ResultNode
+//   - Checks top-level keys in ResultNode
+//   - Checks nested "data" object in ResultNode
+//
 // 5. If not found, return original value
 //
 // Example: If AI node outputs {"action": "scrape", "url": "example.com"},
@@ -811,7 +821,7 @@ func ResolveParam(c *fiber.Ctx, val string) string {
 		// Find all $variable patterns
 		re := regexp.MustCompile(`\$([a-zA-Z_][a-zA-Z0-9_]*)`)
 		matches := re.FindAllStringSubmatch(val, -1)
-		
+
 		for _, match := range matches {
 			if len(match) >= 2 {
 				varName := match[1]
@@ -822,13 +832,13 @@ func ResolveParam(c *fiber.Ctx, val string) string {
 		}
 		return result
 	}
-	
+
 	// Original behavior for simple $variable
 	if strings.HasPrefix(val, "$") {
 		key := strings.TrimPrefix(val, "$")
 		return resolveVariable(c, key)
 	}
-	
+
 	return val
 }
 
@@ -842,6 +852,13 @@ func resolveVariable(c *fiber.Ctx, key string) string {
 	// 2. Check GET
 	if v := c.Query(key); v != "" {
 		return v
+	}
+
+	// 2.5 Check Scoped Params (from Iterator/Schedule)
+	if scopedParams, ok := c.Locals("scopedParams").(map[string]interface{}); ok {
+		if v, exists := scopedParams[key]; exists {
+			return fmt.Sprintf("%v", v)
+		}
 	}
 
 	// 3. Check node results
@@ -866,12 +883,12 @@ func resolveVariable(c *fiber.Ctx, key string) string {
 			}
 		}
 	}
-	
+
 	// 4. Check Locals (auth context etc)
 	if v := c.Locals(key); v != nil {
 		return fmt.Sprintf("%v", v)
 	}
-	
+
 	// Return original key if not found
 	return "$" + key
 }

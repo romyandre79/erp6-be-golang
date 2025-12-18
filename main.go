@@ -5,21 +5,24 @@ import (
 	"erp6-be-golang/core/configs"
 	generator "erp6-be-golang/core/generator/db"
 	"erp6-be-golang/core/scheduler"
+	"time"
 
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/core/i18n"
 	"erp6-be-golang/core/logger"
 	"erp6-be-golang/core/plugin"
+	"erp6-be-golang/models"
+	_ "erp6-be-golang/plugins/admin"
 	"flag"
 	"log"
 	"strconv"
 	"strings"
-	"erp6-be-golang/models"
-	_ "erp6-be-golang/plugins/admin"
 
+	"github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/cors"
-	"fmt"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 )
 
 //go:generate go run generate.go
@@ -120,21 +123,46 @@ func main() {
 	// Init Http
 	bodyLimit, _ := strconv.Atoi(configs.ConfigApps.BodyLimit)
 	caseSensitive, _ := strconv.ParseBool(configs.ConfigApps.CaseSensitive)
+	prefork, _ := strconv.ParseBool(configs.ConfigApps.Prefork)
+	EnablePrintRoutes, _ := strconv.ParseBool(configs.ConfigApps.EnablePrintRoutes)
 	disableKeepAlive, _ := strconv.ParseBool(configs.ConfigApps.DisableKeepAlive)
 	Concurrency, _ := strconv.Atoi(configs.ConfigApps.Concurrency)
 	ReadBufferSize, _ := strconv.Atoi(configs.ConfigApps.ReadBufferSize)
 	WriteBufferSize, _ := strconv.Atoi(configs.ConfigApps.WriteBufferSize)
+	LimiterMax, _ := strconv.Atoi(configs.ConfigApps.LimiterMax)
+	LimiterExpire, _ := strconv.Atoi(configs.ConfigApps.LimiterExpire)
 
 	app := fiber.New(fiber.Config{
 		AppName:           configs.ConfigApps.AppName,
 		BodyLimit:         bodyLimit,
 		CaseSensitive:     caseSensitive,
 		Concurrency:       Concurrency,
-		EnablePrintRoutes: true,
+		EnablePrintRoutes: EnablePrintRoutes,
 		DisableKeepalive:  disableKeepAlive,
 		ReadBufferSize:    ReadBufferSize,
 		WriteBufferSize:   WriteBufferSize,
+		JSONEncoder:       json.Marshal,
+		JSONDecoder:       json.Unmarshal,
+		Prefork:           prefork,
 	})
+
+	app.Use(limiter.New(limiter.Config{
+		Max:        LimiterMax,
+		Expiration: time.Duration(LimiterExpire),
+		KeyGenerator: func(c *fiber.Ctx) string {
+			return c.IP() // Rate limit per IP
+		},
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error": "Rate limit exceeded",
+			})
+		},
+	}))
+
+	// Enable Gzip/Brotli Compression
+	app.Use(compress.New(compress.Config{
+		Level: compress.LevelBestSpeed, // Balance speed vs size
+	}))
 
 	allowedOrigins := strings.Split(configs.ConfigApps.AllowOrigin, ",")
 	for i := range allowedOrigins {
@@ -161,103 +189,6 @@ func main() {
 	})
 
 	app.Static("/", "./public")
-
-	// Catch-all route for SPA (must be last)
-	app.Post("/api/public/request-demo", func(c *fiber.Ctx) error { // Request Demo Handler
-		type DemoRequest struct {
-			Name              string   `json:"name"`
-			Email             string   `json:"email"`
-			Phone             string   `json:"phone"`
-			SelectedApps      []string `json:"selectedApps"`
-			SelectedWorkflows []string `json:"selectedWorkflows"`
-			UsersCount        int      `json:"usersCount"`
-			StorageSize       int      `json:"storageSize"`
-			DeploymentMode    string   `json:"deploymentMode"`
-			ConsultationHours int      `json:"consultationHours"`
-			TransportDays     int      `json:"transportDays"`
-			MonthlyRecurring  float64  `json:"monthlyRecurring"`
-			OneTimeFee        float64  `json:"oneTimeFee"`
-		}
-
-		var req DemoRequest
-		if err := c.BodyParser(&req); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"status":  "error",
-				"message": "Invalid request body",
-			})
-		}
-
-		// Send email
-		to := []string{"romyandre79@gmail.com"}
-		subject := "New Demo Request from " + req.Name
-
-		// Construct formatted lists
-		appsList := "None"
-		if len(req.SelectedApps) > 0 {
-			appsList = fmt.Sprintf("%v", req.SelectedApps)
-		}
-		workflowsList := "None"
-		if len(req.SelectedWorkflows) > 0 {
-			workflowsList = fmt.Sprintf("%v", req.SelectedWorkflows)
-		}
-
-		// EMAIL TEMPLATE - You can adjust the email body here
-		emailTemplate := `
-Hello Admin,
-
-You have received a new demo request for the ERP6 System.
-
-User Details:
--------------
-Name:  %s
-Email: %s
-Phone: %s
-
-Configuration:
---------------
-Deployment: %s
-Users: %d
-Storage: %d GB
-Apps: %s
-Workflows: %s
-
-Services:
----------
-Consultation: %d Hours
-Transport: %d Days
-
-Est. Pricing:
--------------
-Monthly Recurring: Rp %.0f
-One-Time Fee: Rp %.0f
-
-Please contact them shortly.
-
-Best Regards,
-ERP6 Auto-Bot
-`
-		body := fmt.Sprintf(emailTemplate,
-			req.Name, req.Email, req.Phone,
-			req.DeploymentMode, req.UsersCount, req.StorageSize, appsList, workflowsList,
-			req.ConsultationHours, req.TransportDays,
-			req.MonthlyRecurring, req.OneTimeFee,
-		)
-
-		if err := helpers.SendEmail(to, subject, body); err != nil {
-			// Log error but maybe don't fail the request to the user if it's just email failure?
-			// Or arguably we should tell them. Let's return error for now so they know.
-			// Converting err to string for simple logging
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"status":  "error",
-				"message": "Failed to send email: " + err.Error(),
-			})
-		}
-
-		return c.JSON(fiber.Map{
-			"status":  "success",
-			"message": "Demo request sent successfully",
-		})
-	})
 
 	app.Get("*", func(c *fiber.Ctx) error {
 		// Only serve index.html for non-API routes

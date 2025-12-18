@@ -52,6 +52,8 @@ type Config struct {
 	SslCert               string
 	SslKey                string
 	ChatMaxFileSize       string
+	Prefork       string
+	EnablePrintRoutes       string
 }
 
 var ConfigApps *Config
@@ -85,6 +87,7 @@ func LoadConfig() {
 		DateToDb:              getEnv("DATE_TO_DB", ""),
 		DateFromDb:            getEnv("DATE_FROM_DB", ""),
 		DisableKeepAlive:      getEnv("DISABLE_KEEP_ALIVE", ""),
+		EnablePrintRoutes:      getEnv("ENABLE_PRINT_ROUTES", ""),
 		JwtSecret:             getEnv("JWT_SECRET", ""),
 		JwtTtlHour:            getEnv("JWT_TTL_HOUR", ""),
 		LimiterMax:            getEnv("LIMITER_MAX", ""),
@@ -105,6 +108,7 @@ func LoadConfig() {
 		WriteBufferSize:       getEnv("WRITE_BUFFER_SIZE", ""),
 		ExternalComponentPath: getEnv("EXTERNAL_COMPONENT_PATH", "./public/plugins"),
 		IsHttps:               getEnv("IS_HTTPS", "false"),
+		Prefork:               getEnv("PREFORK", "false"),
 		SslCert:               getEnv("SSL_CERT", ""),
 		SslKey:                getEnv("SSL_KEY", ""),
 		ChatMaxFileSize:       getEnv("CHAT_MAX_FILE_SIZE", "10485760"), // Default 10MB
@@ -130,6 +134,7 @@ func LoadConfig() {
 	helpers.IsEmptyLog(ConfigApps.DisableKeepAlive, "DISABLE_KEEP_ALIVE", true)
 	helpers.IsEmptyLog(ConfigApps.DateToDb, "DATE_TO_DB", true)
 	helpers.IsEmptyLog(ConfigApps.DateFromDb, "DATE_FROM_DB", true)
+	helpers.IsEmptyLog(ConfigApps.EnablePrintRoutes, "ENABLE_PRINT_ROUTES", true)
 	helpers.IsEmptyLog(ConfigApps.JwtTtlHour, "JWT_TTL_HOUR", true)
 	helpers.IsEmptyLog(ConfigApps.JwtSecret, "JWT_SECRET", true)
 	helpers.IsEmptyLog(ConfigApps.LogMode, "LOG_MODE", true)
@@ -142,6 +147,7 @@ func LoadConfig() {
 	helpers.IsEmptyLog(ConfigApps.CacheDB, "REDIS_DB", true)
 	helpers.IsEmptyLog(ConfigApps.LimiterMax, "LIMITER_MAX", true)
 	helpers.IsEmptyLog(ConfigApps.LimiterExpire, "LIMITER_EXPIRE", true)
+	helpers.IsEmptyLog(ConfigApps.Prefork, "PREFORK", true)
 	helpers.IsEmptyLog(ConfigApps.ReadBufferSize, "READ_BUFFER_SIZE", true)
 	helpers.IsEmptyLog(ConfigApps.ReportUrl, "REPORT_URL", true)
 	helpers.IsEmptyLog(ConfigApps.ReportUser, "REPORT_USER", true)

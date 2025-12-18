@@ -3,6 +3,7 @@ package i18n
 import (
 	"encoding/json"
 	"log"
+	"os"
 
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 	"golang.org/x/text/language"
@@ -14,10 +15,21 @@ func Init() {
 	Bundle = i18n.NewBundle(language.English)
 	Bundle.RegisterUnmarshalFunc("json", json.Unmarshal)
 
+    // Debug CWD
+    if cwd, err := os.Getwd(); err == nil {
+        log.Printf("Start I18N Check...")
+        log.Printf("Current Working Directory: %s", cwd)
+        
+        files, _ := os.ReadDir("./locales")
+        for _, f := range files {
+            log.Printf("Found in locales: %s", f.Name())
+        }
+    }
+
 	// Load semua file locale
 	files := []string{
-		"./locales/en.json",
-		"./locales/id.json",
+		"locales/en.json",
+		"locales/id.json",
 	}
 
 	for _, f := range files {

@@ -3,6 +3,7 @@ package admin
 import (
 	"erp6-be-golang/core/configs"
 	"erp6-be-golang/core/helpers"
+	"erp6-be-golang/models"
 	"strings"
 	"log"
 
@@ -56,6 +57,24 @@ func AuthMiddleware(c *fiber.Ctx) error {
 	claims, err := ValidateToken(rawToken)
 	if err != nil {
 		log.Printf("AuthMiddleware: Invalid token: %v\n", err)
+
+		// Fix: If token is invalid/expired, try to get UserID and set isonline=0
+		// We parse WITHOUT validation to get the claims
+		token, _ := jwt.ParseWithClaims(rawToken, &CustomClaims{}, func(t *jwt.Token) (interface{}, error) {
+			return []byte(configs.ConfigApps.JwtSecret), nil
+		})
+		
+		if token != nil {
+			if claims, ok := token.Claims.(*CustomClaims); ok {
+				if GlobalDB != nil && claims.UserID > 0 {
+					log.Printf("AuthMiddleware: Auto Offline for UserID %d due to invalid token\n", claims.UserID)
+					GlobalDB.Model(&models.Useraccess{}).
+						Where("useraccessid = ?", claims.UserID).
+						Update("isonline", 0)
+				}
+			}
+		}
+
 		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_TOKEN", err.Error())
 	}
 

@@ -80,7 +80,18 @@ func (h *Hub) Run() {
 	}
 }
 
-// SendToUser sends a message to a specific user's connections
+// GetOnlineUsers returns a list of UserIDs that are currently connected
+func (h *Hub) GetOnlineUsers() []int {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	
+	users := make([]int, 0, len(h.Clients))
+	for userID := range h.Clients {
+		users = append(users, userID)
+	}
+	return users
+}
+
 func (h *Hub) SendToUser(userID int, message []byte) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()

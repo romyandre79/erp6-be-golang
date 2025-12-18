@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"time"
 
 	oracle "github.com/godoes/gorm-oracle"
 	"gorm.io/driver/mysql"
@@ -171,6 +172,8 @@ func InitDatabase() (*gorm.DB, error) {
 	if err == nil {
 		sqlDB.SetMaxOpenConns(MaxConv)
 	}
+
+	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	return db, err
 }

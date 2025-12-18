@@ -43,6 +43,28 @@ func RegisterHandler(name string, handler func()) {
 	log.Printf("Registered job handler: %s", name)
 }
 
+// ReloadSchedulerDebounced debounces the scheduler reload to prevent multiple reloads
+// when multiple workflow details are updated in quick succession.
+var (
+	reloadTimer *time.Timer
+	reloadMu    sync.Mutex
+)
+
+func ReloadSchedulerDebounced(db *gorm.DB) {
+	reloadMu.Lock()
+	defer reloadMu.Unlock()
+
+	if reloadTimer != nil {
+		reloadTimer.Stop()
+	}
+
+	// Wait 2 seconds for other updates to come in
+	reloadTimer = time.AfterFunc(2*time.Second, func() {
+		log.Println("Debounced Scheduler Reload Triggered...")
+		LoadJobs(db)
+	})
+}
+
 // LoadJobs loads jobs from database and schedules them
 func LoadJobs(db *gorm.DB) {
 	// Sync jobs from workflows first
@@ -178,14 +200,21 @@ func runJob(gormDB *gorm.DB, job models.Jobs) {
 func SyncJobsFromWorkflows(db *gorm.DB) {
 	log.Println("SyncJobsFromWorkflows: Starting workflow sync...")
 
+	// 1. Disable all auto-generated system jobs first
+	if err := db.Model(&models.Jobs{}).Where("createdby = ?", "system").Update("recordstatus", 0).Error; err != nil {
+		log.Printf("Failed to disable system jobs: %v", err)
+	}
+
+	// 2. Find active workflows that might contain a schedule
 	var workflows []models.Workflow
-	if err := db.Where("recordstatus = 1").Find(&workflows).Error; err != nil {
+	if err := db.Where("recordstatus = 1 and (flow like ? or flow like ?)", "%schedule%", "%scheduler%").Find(&workflows).Error; err != nil {
 		log.Println("Error loading workflows for sync:", err)
 		return
 	}
 
-	log.Printf("SyncJobsFromWorkflows: Found %d active workflows", len(workflows))
+	log.Printf("SyncJobsFromWorkflows: Found %d active workflows with potential schedules", len(workflows))
 
+	// 3. Iterate and enable/create jobs for valid schedules
 	for _, wf := range workflows {
 		var flowData generator.FlowData
 		if err := json.Unmarshal([]byte(wf.Flow), &flowData); err != nil {
@@ -231,61 +260,47 @@ func SyncJobsFromWorkflows(db *gorm.DB) {
 				}
 			}
 			log.Printf("SyncJobsFromWorkflows: Workflow %s scheduler config - cron: %s, enabled: %s, executable: %s", wf.Wfname, cronExp, enabled, executable)
-		}
 
-		// Check if we need to foster a job for this workflow
-		if foundSchedule && (enabled == "true" || enabled == "1" || strings.ToLower(enabled) == "true") && cronExp != "" {
-			var job models.Jobs
-			err := db.Where("jobname = ?", wf.Wfname).First(&job).Error
+			// Check if we need to foster a job for this workflow
+			if (enabled == "true" || enabled == "1" || strings.ToLower(enabled) == "true") && cronExp != "" {
+				var job models.Jobs
+				err := db.Where("jobname = ?", wf.Wfname).First(&job).Error
 
-			if err == gorm.ErrRecordNotFound {
-				// Create new job
-				var maxID int
-				db.Model(&models.Jobs{}).Select("IFNULL(MAX(jobsid), 0)").Scan(&maxID)
+				if err == gorm.ErrRecordNotFound {
+					// Create new job
+					var maxID int
+					db.Model(&models.Jobs{}).Select("IFNULL(MAX(jobsid), 0)").Scan(&maxID)
 
-				newJob := models.Jobs{
-					JobsID:       maxID + 1,
-					JobName:      wf.Wfname,
-					Description:  "Auto-generated from workflow " + wf.Wfname,
-					Version:      "1.0",
-					CreatedBy:    "system",
-					Flow:         wf.Wfname,
-					Executable:   executable,
-					Schedule:     cronExp,
-					RecordStatus: 1,
-					LastRunning:  time.Now(),
-				}
+					newJob := models.Jobs{
+						JobsID:       maxID + 1,
+						JobName:      wf.Wfname,
+						Description:  "Auto-generated from workflow " + wf.Wfname,
+						Version:      "1.0",
+						CreatedBy:    "system",
+						Flow:         wf.Wfname,
+						Executable:   executable,
+						Schedule:     cronExp,
+						RecordStatus: 1, // Enable it
+						LastRunning:  time.Now(),
+					}
 
-				if err := db.Create(&newJob).Error; err != nil {
-					log.Printf("Failed to create auto-job for workflow %s: %v", wf.Wfname, err)
-				} else {
-					log.Printf("Created auto-job for workflow %s with schedule %s", wf.Wfname, cronExp)
-				}
-			} else if err == nil {
-				// Update existing job if needed
-				if job.Schedule != cronExp || job.RecordStatus != 1 || job.Flow != wf.Wfname {
+					if err := db.Create(&newJob).Error; err != nil {
+						log.Printf("Failed to create auto-job for workflow %s: %v", wf.Wfname, err)
+					} else {
+						log.Printf("Created auto-job for workflow %s with schedule %s", wf.Wfname, cronExp)
+					}
+				} else if err == nil {
+					// Update existing job and enable it
 					if err := db.Model(&job).Updates(map[string]interface{}{
 						"schedule":     cronExp,
-						"recordstatus": 1,
+						"recordstatus": 1, // Re-enable
 						"flow":         wf.Wfname,
 						"executable":   executable,
+						"createdby":    "system", // Ensure it's marked as system
 					}).Error; err != nil {
 						log.Printf("Failed to update auto-job for workflow %s: %v", wf.Wfname, err)
 					} else {
-						log.Printf("Updated auto-job for workflow %s with new schedule %s", wf.Wfname, cronExp)
-					}
-				}
-			}
-		} else {
-			// If schedule component missing or disabled, ensure no active job exists for this workflow
-			var job models.Jobs
-			if err := db.Where("jobname = ?", wf.Wfname).First(&job).Error; err == nil {
-				// We found a job with this name. If it was auto-generated by us (or matches flow name), disable it.
-				if job.RecordStatus == 1 {
-					if err := db.Model(&job).Update("recordstatus", 0).Error; err != nil {
-						log.Printf("Failed to disable job %s: %v", wf.Wfname, err)
-					} else {
-						log.Printf("Disabled job %s because schedule component was removed or disabled", wf.Wfname)
+						log.Printf("Updated and enabled auto-job for workflow %s with schedule %s", wf.Wfname, cronExp)
 					}
 				}
 			}

@@ -11,13 +11,14 @@ import (
 
 // WorkflowContext holds the context for a component execution
 type WorkflowContext struct {
-	FiberCtx       *fiber.Ctx
-	DB             *gorm.DB
-	Params         []WorkflowDetailResult
-	Search         bool
-	FileHeader     *multipart.FileHeader
-	Extras         map[string]interface{}
-	DecisionResult bool
+	FiberCtx         *fiber.Ctx
+	DB               *gorm.DB
+	Params           []WorkflowDetailResult
+	Search           bool
+	FileHeader       *multipart.FileHeader
+	Extras           map[string]interface{}
+	DecisionResult   bool
+	CurrentComponent Component
 }
 
 // ComponentHandler is the interface that all workflow components must implement

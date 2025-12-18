@@ -43,8 +43,81 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 	driver := GetDatabaseDriver(db)
 	whereStat := ""
 	wheres := strings.Fields(compValue)
-	for _, data := range wheres {
+	for i := 0; i < len(wheres); i++ {
+		data := wheres[i]
 		dataLower := strings.ToLower(data)
+
+		// Check for lookahead "IN" or "NOT IN" operator to prevent auto-LIKE on dot-notation fields
+		// AND to handle "IN *" or "NOT IN *" (wildcard checks)
+		isNextIn := false
+
+		// Lookahead for Field LIKE Value
+		if i+2 < len(wheres) {
+			if strings.ToLower(wheres[i+1]) == "like" {
+				// field like $param
+				field := wheres[i]
+				valParam := wheres[i+2]
+
+				// Resolve value
+				val := ResolveParam(c, valParam)
+				val = strings.Trim(val, "'") // Strip quotes if present
+
+				if val == "null" {
+					val = ""
+				}
+
+				// If value is still a variable (unresolved), treat as empty
+				if strings.HasPrefix(val, "$") {
+					val = ""
+				}
+
+				// Wrap in % for like
+				val = "%" + val + "%"
+
+				// Construct SQL
+				whereStat += fmt.Sprintf("(COALESCE(%s, '') LIKE '%s') ", field, val)
+
+				i += 2
+				continue
+			}
+		}
+
+		// Lookahead for Field IN Value
+		if i+2 < len(wheres) {
+			if strings.ToLower(wheres[i+1]) == "in" {
+				isNextIn = true
+
+				// Check if Value is wildcard '*'
+				val := ResolveParam(c, wheres[i+2])
+				cleanVal := strings.Trim(val, "()")
+
+				if cleanVal == "*" {
+					// Field IN * -> Treat as ALL (True)
+					whereStat += " 1=1 "
+					i += 2 // Skip Field, IN, Value
+					continue
+				}
+			}
+		}
+
+		// Lookahead for Field NOT IN Value
+		if i+3 < len(wheres) {
+			if strings.ToLower(wheres[i+1]) == "not" && strings.ToLower(wheres[i+2]) == "in" {
+				isNextIn = true
+
+				// Check if Value is wildcard '*'
+				val := ResolveParam(c, wheres[i+3])
+				cleanVal := strings.Trim(val, "()")
+
+				if cleanVal == "*" {
+					// Field NOT IN * -> Treat as NONE (False)
+					whereStat += " 0=1 "
+					i += 3 // Skip Field, NOT, IN, Value
+					continue
+				}
+			}
+		}
+
 		if dataLower != "and" && dataLower != "or" {
 			// Check if there's '@' → dynamic function
 			if strings.Contains(data, "@") {
@@ -162,7 +235,7 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 					funcs := strings.Split(data, "=")
 					val := GetSearchText(c, []string{"POST"}, funcs[1], "", "string")
 					whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", data, val)
-				} else if strings.Contains(data, ".") {
+				} else if strings.Contains(data, ".") && !isNextIn { // Skip auto-LIKE if followed by IN
 					funcs := strings.Split(data, ".")
 					val := GetSearchText(c, []string{"POST"}, funcs[1], "", "string")
 					cleanVal := strings.ReplaceAll(val, "%", "")
@@ -185,12 +258,12 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 						}
 					}
 				} else {
-					whereStat += " " + data + " "
+					whereStat += " " + ResolveParam(c, data) + " "
 				}
 			}
 		} else {
 			// and / or
-			whereStat += " " + data + " "
+			whereStat += " " + ResolveParam(c, data) + " "
 		}
 	}
 	return whereStat

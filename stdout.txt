@@ -1,0 +1,2 @@
+[Init] Registering component 'authdata' and 'auth_data'
+[Init] Registering component 'check_online' & aliases

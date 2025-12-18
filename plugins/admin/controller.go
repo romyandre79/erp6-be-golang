@@ -226,12 +226,8 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 
 	// Auto-reload scheduler if this was a workflow modification
 	if strings.Contains(flowName, "modif") && strings.Contains(flowName, "workflow") {
-		go func() {
-			log.Info("Workflow modified - reloading scheduler...")
-			scheduler.SyncJobsFromWorkflows(db)
-			scheduler.LoadJobs(db) // Reload the cron scheduler with updated jobs
-			log.Info("Scheduler reloaded successfully")
-		}()
+		// Use debounced reload to prevent multiple reloads from frontend batch requests
+		scheduler.ReloadSchedulerDebounced(db)
 	}
 
 	// If debug mode, return step results
@@ -339,7 +335,6 @@ func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
 	menuName := c.Query("menuname")
 	isDesign := c.Query("design") == "true"
 
-
 	if userID == nil {
 		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_USER", "NO_USER_FOUND")
 	}
@@ -350,32 +345,32 @@ func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
 	if err := db.Where("menuname = ?", menuName).First(&menus).Error; err != nil {
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MENU_QUERY_FAILED", err.Error())
 	}
-	
+
 	// CHECK SCHEMA LOCK
 	var lock models.Recordlock
 	err := db.Where("tablename = ? AND recordid = ?", "sys_menu", menus.Menuaccessid).First(&lock).Error
 	if err == nil {
 		// Found lock!
-		
+
 		// Check Expiry (5 minutes)
 		if time.Since(lock.Lockedat) > 5*time.Minute {
 			// Expired! Delete it and proceed
 			db.Delete(&lock)
 		} else {
 			currentUserID, _ := userID.(int)
-			
+
 			// 1. If locked by ANOTHER user -> BLOCK
 			if lock.Lockedby != currentUserID {
 				var lockingUser models.Useraccess
 				db.Where("useraccessid = ?", lock.Lockedby).First(&lockingUser)
-				return helpers.FailResponse(c, fiber.StatusLocked, "SCHEMA_LOCKED", 
-					fmt.Sprintf("This menu is currently being designed by %s since %s", 
+				return helpers.FailResponse(c, fiber.StatusLocked, "SCHEMA_LOCKED",
+					fmt.Sprintf("This menu is currently being designed by %s since %s",
 						lockingUser.Username, lock.Lockedat.Format("15:04")))
 			}
-	
+
 			// 2. If locked by ME but accessing RUNTIME (not design) -> BLOCK
 			if lock.Lockedby == currentUserID && !isDesign {
-				return helpers.FailResponse(c, fiber.StatusLocked, "SCHEMA_LOCKED", 
+				return helpers.FailResponse(c, fiber.StatusLocked, "SCHEMA_LOCKED",
 					"You are currently editing this menu in Form Designer.")
 			}
 		}
@@ -386,7 +381,53 @@ func MenuSingleNameHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "MODULE_QUERY_FAILED", err.Error())
 	}
 
-	return helpers.SuccessResponse(c, "DATA RETRIEVED", menus)
+	// CHECK PERMISSIONS
+	type Permissions struct {
+		IsWrite    int `json:"iswrite" gorm:"column:iswrite"`
+		IsRead     int `json:"isread" gorm:"column:isread"`
+		IsPurge    int `json:"ispurge" gorm:"column:ispurge"`
+		IsUpload   int `json:"isupload" gorm:"column:isupload"`
+		IsDownload int `json:"isdownload" gorm:"column:isdownload"`
+	}
+	var perms Permissions
+
+	// Ensure userID is int
+	var uid int
+	if v, ok := userID.(int); ok {
+		uid = v
+	} else if v, ok := userID.(uint); ok {
+		uid = int(v)
+	}
+
+	err = db.Table("usergroup ug").
+		Select(`
+			COALESCE(MAX(gm.iswrite), 0) as iswrite, 
+			COALESCE(MAX(gm.isread), 0) as isread, 
+			COALESCE(MAX(gm.ispurge), 0) as ispurge, 
+			COALESCE(MAX(gm.isupload), 0) as isupload, 
+			COALESCE(MAX(gm.isdownload), 0) as isdownload
+		`).
+		Joins("JOIN groupaccess ga ON ga.groupaccessid = ug.groupaccessid").
+		Joins("JOIN groupmenu gm ON gm.groupaccessid = ga.groupaccessid").
+		Where("ug.useraccessid = ? AND gm.menuaccessid = ? AND ga.recordstatus = 1", uid, menus.Menuaccessid).
+		Scan(&perms).Error
+
+	if err != nil {
+		log.Errorf("Permission Query Failed for User %d Menu %d: %v", uid, menus.Menuaccessid, err)
+	} else {
+		//log.Infof("Permissions for User %d Menu %d (%s): %+v", uid, menus.Menuaccessid, menus.Menuname, perms)
+	}
+
+	// Construct Response
+	response := struct {
+		models.Menuaccess
+		Permissions
+	}{
+		Menuaccess:  menus,
+		Permissions: perms,
+	}
+
+	return helpers.SuccessResponse(c, "DATA RETRIEVED", response)
 }
 
 func LockRecordHandler(c *fiber.Ctx, db *gorm.DB) error {
@@ -406,7 +447,7 @@ func LockRecordHandler(c *fiber.Ctx, db *gorm.DB) error {
 	// Check existing lock
 	var existingLock models.Recordlock
 	err := db.Where("tablename = ? AND recordid = ?", req.TableName, req.RecordID).First(&existingLock).Error
-	
+
 	if err == nil {
 		// Check Expiry (5 minutes)
 		if time.Since(existingLock.Lockedat) > 5*time.Minute {
@@ -422,7 +463,7 @@ func LockRecordHandler(c *fiber.Ctx, db *gorm.DB) error {
 			// Locked by other
 			var lockingUser models.Useraccess
 			db.Where("useraccessid = ?", existingLock.Lockedby).First(&lockingUser)
-			return helpers.FailResponse(c, fiber.StatusConflict, "RECORD_LOCKED", 
+			return helpers.FailResponse(c, fiber.StatusConflict, "RECORD_LOCKED",
 				fmt.Sprintf("Locked by %s", lockingUser.Username))
 		}
 	}
@@ -436,12 +477,14 @@ func LockRecordHandler(c *fiber.Ctx, db *gorm.DB) error {
 		Sessionid: sessionID,
 		Lockedat:  time.Now(),
 	}
-	if req.LockType == "" { lock.Locktype = "edit" }
+	if req.LockType == "" {
+		lock.Locktype = "edit"
+	}
 
 	if err := db.Create(&lock).Error; err != nil {
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "LOCK_FAILED", err.Error())
 	}
-	
+
 	return helpers.SuccessResponse(c, "LOCK_ACQUIRED", nil)
 }
 
@@ -457,9 +500,9 @@ func UnlockRecordHandler(c *fiber.Ctx, db *gorm.DB) error {
 
 	userID := c.Locals("userid").(int)
 
-	result := db.Where("tablename = ? AND recordid = ? AND lockedby = ?", 
+	result := db.Where("tablename = ? AND recordid = ? AND lockedby = ?",
 		req.TableName, req.RecordID, userID).Delete(&models.Recordlock{})
-	
+
 	if result.Error != nil {
 		return helpers.FailResponse(c, fiber.StatusInternalServerError, "UNLOCK_FAILED", result.Error.Error())
 	}

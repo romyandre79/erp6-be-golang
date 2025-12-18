@@ -277,7 +277,7 @@
     "THEMENAME": "Theme",
     "THEMEID": "ID",
     "ISADMIN": "Admin",
-    "DESCRIPTION": "Description",
+    "DESCRIPTION_TEXT": "Description",
     "CREATEDBY": "Created By",
     "THEMEVERSION": "Theme Version",
     "RECORDSTATUS": "Status",
