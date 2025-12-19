@@ -57,6 +57,10 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 	auth.Post("/login", func(c *fiber.Ctx) error { return LoginHandler(c, db) })
 	auth.Post("/load-theme", func(c *fiber.Ctx) error { return LoadThemeHandler(c, db) })
 
+	// Public CMS Routes
+	public := app.Group("/api/public")
+	public.Get("/page/*", func(c *fiber.Ctx) error { return PublicPageHandler(c, db) })
+
 	// Protected routes
 	auth.Use(AuthMiddleware)
 	{
