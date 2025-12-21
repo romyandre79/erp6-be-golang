@@ -27,6 +27,12 @@ go.work.sum
 .env
 !.env.example
 
+# Database init files
+db-init*.sql
+
+# Uploads directory
+uploads/
+
 # Editor/IDE
 # .idea/
 # .vscode/
