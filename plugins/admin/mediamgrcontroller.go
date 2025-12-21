@@ -11,12 +11,18 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-const BaseUploadDir = "./public"
+type MediaController struct {
+	RootPath string
+}
+
+func NewMediaController(rootPath string) *MediaController {
+	return &MediaController{RootPath: rootPath}
+}
 
 // 🟢 List semua file/folder
-func ListMedia(c *fiber.Ctx) error {
+func (m *MediaController) ListMedia(c *fiber.Ctx) error {
 	path := c.Query("path", "")
-	target := filepath.Join(BaseUploadDir, path)
+	target := filepath.Join(m.RootPath, path)
 
 	files, err := os.ReadDir(target)
 	if err != nil {
@@ -47,7 +53,7 @@ func ListMedia(c *fiber.Ctx) error {
 }
 
 // 🟡 Upload file
-func UploadMedia(c *fiber.Ctx) error {
+func (m *MediaController) UploadMedia(c *fiber.Ctx) error {
 	form, err := c.MultipartForm()
 	if err != nil {
 		return c.Status(400).JSON(fiber.Map{"error": "Invalid form"})
@@ -55,7 +61,7 @@ func UploadMedia(c *fiber.Ctx) error {
 
 	files := form.File["file"]
 	path := c.FormValue("path", "")
-	saveDir := filepath.Join(BaseUploadDir, path)
+	saveDir := filepath.Join(m.RootPath, path)
 	os.MkdirAll(saveDir, os.ModePerm)
 
 	for _, file := range files {
@@ -69,13 +75,13 @@ func UploadMedia(c *fiber.Ctx) error {
 }
 
 // 🔴 Delete file atau folder
-func DeleteMedia(c *fiber.Ctx) error {
+func (m *MediaController) DeleteMedia(c *fiber.Ctx) error {
 	path := c.Query("path")
 	if path == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "path required"})
 	}
 
-	target := filepath.Join(BaseUploadDir, path)
+	target := filepath.Join(m.RootPath, path)
 	if err := os.RemoveAll(target); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -84,7 +90,7 @@ func DeleteMedia(c *fiber.Ctx) error {
 }
 
 // 🟣 Rename file/folder
-func RenameMedia(c *fiber.Ctx) error {
+func (m *MediaController) RenameMedia(c *fiber.Ctx) error {
 	var body struct {
 		OldPath string `json:"oldPath"`
 		NewName string `json:"newName"`
@@ -93,7 +99,7 @@ func RenameMedia(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	oldPath := filepath.Join(BaseUploadDir, body.OldPath)
+	oldPath := filepath.Join(m.RootPath, body.OldPath)
 	newPath := filepath.Join(filepath.Dir(oldPath), body.NewName)
 
 	if err := os.Rename(oldPath, newPath); err != nil {
@@ -104,7 +110,7 @@ func RenameMedia(c *fiber.Ctx) error {
 }
 
 // 🟤 Buat folder baru
-func CreateFolder(c *fiber.Ctx) error {
+func (m *MediaController) CreateFolder(c *fiber.Ctx) error {
 	var body struct {
 		Path   string `json:"path"`
 		Folder string `json:"folder"`
@@ -113,7 +119,7 @@ func CreateFolder(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	newFolder := filepath.Join(BaseUploadDir, body.Path, body.Folder)
+	newFolder := filepath.Join(m.RootPath, body.Path, body.Folder)
 	if err := os.MkdirAll(newFolder, os.ModePerm); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -122,13 +128,13 @@ func CreateFolder(c *fiber.Ctx) error {
 }
 
 // ⚪ Preview file text (txt, json, md, dll)
-func PreviewMedia(c *fiber.Ctx) error {
+func (m *MediaController) PreviewMedia(c *fiber.Ctx) error {
 	path := c.Query("path")
 	if path == "" {
 		return c.Status(400).JSON(fiber.Map{"error": "path required"})
 	}
 
-	target := filepath.Join(BaseUploadDir, path)
+	target := filepath.Join(m.RootPath, path)
 	file, err := os.Open(target)
 	if err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
@@ -178,3 +184,37 @@ func PreviewMedia(c *fiber.Ctx) error {
 		"mime":    mimeType,
 	})
 }
+
+// 💾 Save file content (create or update)
+func (m *MediaController) SaveMedia(c *fiber.Ctx) error {
+	var body struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	if body.Path == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "path required"})
+	}
+
+	target := filepath.Join(m.RootPath, body.Path)
+	
+	// Write content to file
+	if err := os.WriteFile(target, []byte(body.Content), 0644); err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"message": "Saved"})
+}
+
+// Helpers for backward compatibility if needed, or just use the struct directly
+var DefaultMediaController = NewMediaController("./public")
+
+func ListMedia(c *fiber.Ctx) error { return DefaultMediaController.ListMedia(c) }
+func UploadMedia(c *fiber.Ctx) error { return DefaultMediaController.UploadMedia(c) }
+func DeleteMedia(c *fiber.Ctx) error { return DefaultMediaController.DeleteMedia(c) }
+func RenameMedia(c *fiber.Ctx) error { return DefaultMediaController.RenameMedia(c) }
+func CreateFolder(c *fiber.Ctx) error { return DefaultMediaController.CreateFolder(c) }
+func PreviewMedia(c *fiber.Ctx) error { return DefaultMediaController.PreviewMedia(c) }

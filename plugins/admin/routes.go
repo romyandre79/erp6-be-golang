@@ -166,5 +166,27 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		media.Post("/rename", RenameMedia)
 		media.Post("/folder", CreateFolder)
 		media.Get("/preview", PreviewMedia)
+		media.Get("/preview", PreviewMedia)
+	}
+
+	// System Information & File Manager Routes
+	sysinfo := app.Group("/api/admin/sysinfo")
+	sysinfo.Use(AuthMiddleware)
+	{
+		// Stats
+		sysinfo.Get("/stats", GetSysInfo)
+
+		// Processes
+		sysinfo.Get("/processes", GetProcesses)
+		sysinfo.Post("/processes/:pid/kill", KillProcess)
+
+		// File Manager (System)
+		sysinfo.Get("/files", SysListFiles)
+		sysinfo.Post("/files/upload", SysFileMgr.UploadMedia)
+		sysinfo.Get("/files/preview", SysFileMgr.PreviewMedia)
+		sysinfo.Post("/files/folder", SysFileMgr.CreateFolder)
+		sysinfo.Post("/files/rename", SysFileMgr.RenameMedia)
+		sysinfo.Delete("/files/delete", SysFileMgr.DeleteMedia)
+		sysinfo.Post("/files/save", SysFileMgr.SaveMedia)
 	}
 }

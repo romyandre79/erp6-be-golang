@@ -6,6 +6,7 @@
     "ACCOUNT": "Account",
     "ACCOUNT PAYABLE REPORT": "Account Payable Report",
     "ACCOUNT PERIOD": "Account Period",
+    "ACCOUNTING PERIOD": "Account Period",
     "ACCOUNT RECEIVABLE REPORT": "Account Receivable Report",
     "ACCOUNT TYPE": "Account Type",
     "ACCOUNTING": "Accounting",
@@ -177,12 +178,13 @@
     "PURCHASE ORDER LIST": "Purchase Order List",
     "PURCHASE REQUEST": "Purchase Request",
     "PURCHASE REQUEST LIST": "Purchase Request List",
-    "PURCHASING": "Purchasing",
+    "PROCUREMENT": "Procurement",
     "PURCHASING INFO RECORD": "Purchasing Info Record",
     "QC": "QC",
     "QUALIFICATION PARAMETER": "Qualification Parameter",
     "QUALIFICATION TEST": "Qualification Test",
     "RATE": "Rate",
+    "CURRENCY RATE": "Rate",
     "READ MORE": "Read More ...",
     "RECRUIT REQUEST LIST": "Recruit Request List",
     "RECURRING TYPE": "Reccuring Type",
@@ -277,7 +279,7 @@
     "THEMENAME": "Theme",
     "THEMEID": "ID",
     "ISADMIN": "Admin",
-    "DESCRIPTION_TEXT": "Description",
+    "DESCRIPTION": "Description",
     "CREATEDBY": "Created By",
     "THEMEVERSION": "Theme Version",
     "RECORDSTATUS": "Status",
@@ -407,7 +409,7 @@
             },
             "CUSTOM_NODES": {
                 "TITLE": "Custom Nodes",
-                "DESC": "Create your own custom nodes with JavaScript or Python"
+                "DESC": "Create your own custom nodes with other Language, Interpreter Go, or even .NET and executable"
             }
         },
         "AUTOMATION": {
@@ -473,5 +475,67 @@
     "SEARCH A CURRENCY CODE": "Search A Currency Code",
     "SEARCH A CURRENCY NAME": "Search A Currency Name",
     "SEARCH A USER NAME": "Search A User Name",
-    "ENTER A WORKFLOW NAME": "Enter A Workflow Name"
+    "ENTER A WORKFLOW NAME": "Enter A Workflow Name",
+    "ERP": {
+        "HERO": {
+            "TITLE_PREFIX": "Power Your Business",
+            "TITLE_SUFFIX": "With Intelligent ERP",
+            "SUBTITLE": "Experience the future of enterprise management. AI-driven insights, drag-and-drop customization, and seamless workflows—all in one place.",
+            "GET_STARTED": "Get Started",
+            "LEARN_MORE": "Learn More"
+        },
+        "FEATURES": {
+            "TITLE": "Core Capabilities",
+            "SUBTITLE": "Built for flexibility and performance."
+        },
+        "MODULES": {
+            "TITLE": "Enterprise Modules",
+            "SUBTITLE": "Check comprehensive suite to manage every aspect of your business."
+        },
+        "PRICING": {
+            "TITLE": "Calculate Your Price",
+            "SUBTITLE": "Select the applications you need and the number of users.",
+            "CHOOSE_DEPLOYMENT": "Choose Deployment",
+            "SELECT_APPS": "Select Applications",
+            "USERS_COUNT": "How many users?",
+            "USERS_ADMIN": "Administrator Users",
+            "USERS_OPERATIONAL": "Operational Users",
+            "USERS_VIEWER": "Viewer Users",
+            "USERS_NOTE": "Cloud: Price depends on user role.",
+            "STORAGE": "Data Storage",
+            "STORAGE_NOTE": "Included 10GB basic. +Rp 20.000 per 10GB extra.",
+            "SERVICES": "Services & Implementation",
+            "CONSULTATION": "Consultation (Man Hours)",
+            "TRANSPORT": "Transport & Accommodation",
+            "WORKFLOWS": "Add Extra Capabilities (Workflows)",
+            "ESTIMATED_COST": "Estimated Cost",
+            "REQUEST_QUOTE": "Request Quote",
+            "DEPLOYMENT": "Deployment",
+            "TOTAL_ONE_TIME": "Total One-Time",
+            "TOTAL_MONTHLY": "Total Monthly Recurring"
+        },
+        "DEMO": {
+            "TITLE": "Request a Demo",
+            "SUBTITLE": "See our ERP in action. Fill out the form below and we'll be in touch shortly.",
+            "NAME": "Full Name",
+            "PHONE": "Phone Number",
+            "EMAIL": "Email Address",
+            "SEND": "Send Request",
+            "SENDING": "Sending...",
+            "SUCCESS": "Thank you! Your demo request has been sent successfully.",
+            "ERROR": "Something went wrong. Please try again later."
+        },
+        "APPS": {
+            "ACCOUNTING": "Accounting",
+            "WAREHOUSE": "Warehouse",
+            "PRODUCTION": "Production",
+            "ORDER": "Order Mgmt",
+            "PROCUREMENT": "Procurement",
+            "EPROCUREMENT": "E-Procurement",
+            "HR": "Human Resource",
+            "PROJECT": "Project Mgmt"
+        },
+        "SLOC ACCOUNTING": "Sloc Accounting",
+        "SLOC": "Storage Location"
+    }
 }

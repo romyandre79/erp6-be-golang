@@ -45,11 +45,31 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 	wheres := strings.Fields(compValue)
 	for i := 0; i < len(wheres); i++ {
 		data := wheres[i]
+
+		// Resolve any $parameters within the token (e.g., month($postdate) -> month('2024-07-04'))
+		// This handles SQL functions containing parameters
+		if strings.Contains(data, "$") {
+			data = ResolveParam(c, data)
+		}
+
 		dataLower := strings.ToLower(data)
 
 		// Check for lookahead "IN" or "NOT IN" operator to prevent auto-LIKE on dot-notation fields
 		// AND to handle "IN *" or "NOT IN *" (wildcard checks)
 		isNextIn := false
+
+		// If this token is a SQL operator, pass it through as-is
+		if data == "=" || data == "!=" || data == ">" || data == "<" || data == ">=" || data == "<=" || data == "<>" {
+			whereStat += " " + data + " "
+			continue
+		}
+
+		// If this token is a SQL function (contains parentheses), pass it through as-is
+		// This prevents month(2023-07-04) from being treated as a field name
+		if strings.Contains(data, "(") && strings.Contains(data, ")") {
+			whereStat += " " + data + " "
+			continue
+		}
 
 		// Lookahead for Field LIKE Value
 		if i+2 < len(wheres) {
