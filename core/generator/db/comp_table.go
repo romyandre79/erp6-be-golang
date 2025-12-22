@@ -12,11 +12,15 @@ import (
 
 func init() {
 	RegisterComponent("table", func(ctx *WorkflowContext) error {
-		return handleTable(ctx.FiberCtx, ctx.Params, ctx.DB)
+		return handleTable(ctx)
 	})
 }
 
-func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error {
+func handleTable(ctx *WorkflowContext) error {
+	c := ctx.FiberCtx
+	params := ctx.Params
+	db := ctx.DB
+	
 	var (
 		param     string
 		tablename string
@@ -82,10 +86,36 @@ func handleTable(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 
 			if strings.Contains(valRaw, "$") {
 				lookupKey := strings.ReplaceAll(valRaw, "$", "")
-				val := c.Query(lookupKey)
-				if val == "" {
-					val = c.FormValue(lookupKey)
+				var val string
+				
+				// Priority 1: Check Extras from previous workflow nodes or conversation state
+				if ctx.Extras != nil {
+					if extraVal, exists := ctx.Extras[lookupKey]; exists {
+						val = fmt.Sprint(extraVal)
+					}
 				}
+				
+				// Priority 2: Check Locals (JWT token data)
+				if val == "" {
+					if lookupKey == "userid" {
+						if userID, ok := c.Locals("userid").(int); ok && userID != 0 {
+							val = fmt.Sprint(userID)
+						}
+					} else if lookupKey == "username" {
+						if username, ok := c.Locals("username").(string); ok && username != "" {
+							val = username
+						}
+					}
+				}
+				
+				// Priority 3: Check Query and FormValue
+				if val == "" {
+					val = c.Query(lookupKey)
+					if val == "" {
+						val = c.FormValue(lookupKey)
+					}
+				}
+				
 				newParam[parts[0]] = val
 			} else {
 				newParam[parts[0]] = valRaw
