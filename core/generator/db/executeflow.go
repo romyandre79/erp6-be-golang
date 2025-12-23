@@ -432,6 +432,12 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		}
 	}
 
+	// Retrieve extras from Fiber Locals if available (persistence across nodes)
+	extras, _ := c.Locals("wfExtras").(map[string]interface{})
+	if extras == nil {
+		extras = make(map[string]interface{})
+	}
+
 	// Create context for the component
 	ctx := &WorkflowContext{
 		FiberCtx:         c,
@@ -439,6 +445,7 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		Params:           workflowDetailResult,
 		Search:           search,
 		CurrentComponent: component,
+		Extras:           extras,
 	}
 
 	// Handle special cases for context population
@@ -463,6 +470,8 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 			appendStepResult(c, workflowId, nodeId, component.Name, inputParams, nil, false, execTime, err.Error())
 			return err
 		}
+		// Save extras back to locals to persist changes
+		c.Locals("wfExtras", ctx.Extras)
 	} else {
 		execTime := float64(time.Since(startTime).Milliseconds())
 		appendStepResult(c, workflowId, nodeId, component.Name, inputParams, nil, false, execTime, fmt.Sprintf("unknown component: %s", component.Name))

@@ -74,6 +74,17 @@ func handleTable(ctx *WorkflowContext) error {
 
 	// build parameter baru
 	newParam := map[string]interface{}{}
+	
+	// Debug: Print available Extras
+	if ctx.Extras != nil {
+		fmt.Println("[CompTable] Available Extras:")
+		for k, v := range ctx.Extras {
+			fmt.Printf("  - %s: %v\n", k, v)
+		}
+	} else {
+		fmt.Println("[CompTable] No Extras available")
+	}
+
 	for _, key := range listOldParam {
 		if strings.Contains(key, "=") {
 			parts := strings.SplitN(key, "=", 2)
@@ -88,10 +99,13 @@ func handleTable(ctx *WorkflowContext) error {
 				lookupKey := strings.ReplaceAll(valRaw, "$", "")
 				var val string
 				
+				fmt.Printf("[CompTable] Attempting to resolve variable: '%s' (key: '%s')\n", valRaw, lookupKey)
+
 				// Priority 1: Check Extras from previous workflow nodes or conversation state
 				if ctx.Extras != nil {
 					if extraVal, exists := ctx.Extras[lookupKey]; exists {
 						val = fmt.Sprint(extraVal)
+						fmt.Printf("[CompTable] Found in Extras: %s\n", val)
 					}
 				}
 				
@@ -114,6 +128,10 @@ func handleTable(ctx *WorkflowContext) error {
 					if val == "" {
 						val = c.FormValue(lookupKey)
 					}
+				}
+				
+				if val == "" {
+					fmt.Printf("[CompTable] Failed to resolve '%s', using empty string\n", lookupKey)
 				}
 				
 				newParam[parts[0]] = val
@@ -156,7 +174,15 @@ func handleTable(ctx *WorkflowContext) error {
 				db.Raw("SELECT LAST_INSERT_ID()").Scan(&lastID)
 			}
 			postData["lastid"] = fmt.Sprint(lastID)
-			helpers.SuccessResponse(c, "DATA SAVED", "")
+			
+			// Construct response data
+			responseData := make(map[string]interface{})
+			for k, v := range newParam {
+				responseData[k] = v
+			}
+			responseData["lastid"] = lastID
+			
+			helpers.SuccessResponse(c, "DATA SAVED", responseData)
 		} else {
 			result := db.Table(tablename).Session(&gorm.Session{DryRun: true}).Create(newParam)
 			rawQuery := result.Statement.SQL.String()
