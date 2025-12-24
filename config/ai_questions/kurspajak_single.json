@@ -1,0 +1,32 @@
+{
+    "questions": [
+        {
+            "key": "currency",
+            "text": "Which currency? (e.g. USD, SGD)",
+            "validation": "required",
+            "description": "Enter the currency code"
+        },
+        {
+            "key": "date",
+            "text": "For which date? (YYYY-MM-DD or 'today')",
+            "validation": "optional",
+            "description": "Leave empty for today"
+        }
+    ],
+    "queries": {
+        "default": "{\"url\": \"https://fiskal.kemenkeu.go.id/informasi-publik/kurs-pajak\", \"method\": \"browser\", \"selector\": \"table.table\", \"extraction_rules\": \"{\\\"currency\\\":\\\"table.table tbody tr td:nth-child(2)\\\",\\\"rate\\\":\\\"table.table tbody tr td:nth-child(3)\\\",\\\"change\\\":\\\"table.table tbody tr td:nth-child(4)\\\"}\", \"action\":\"extract_one_data\", \"filter\": \"currency={{.currency}}\", \"form_data\": \"\", \"submit_selector\": \"\", \"wait_time\": \"5000\", \"user_agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\"}"
+    },
+    "params": [],
+    "defaults": {
+        "date": "today"
+    },
+    "description": "Scrape Single Tax Exchange Rate (Kurs Pajak)",
+    "meta_action": "kurspajak_single",
+    "success_message": "Scraping request for {{.currency}} tax rate sent!",
+    "triggers": [
+        "kurs pajak single",
+        "currency tax single",
+        "pajak single",
+        "kurs pajak satuan"
+    ]
+}

@@ -143,48 +143,56 @@ func handleTransform(ctx *WorkflowContext) error {
 
 	case "format_array":
 		fmt.Println("[Transform] Processing format_array...")
-		// Format two parallel arrays into a message (like currency = rate)
-		// Defaults
+		// Format arrays into a message
 		if separator == "" {
-			separator = " = "
+			separator = " "
 		}
-		lineFormat := messageTemplate
-		if lineFormat == "" {
-			lineFormat = "{key}{sep}{value}"
-		}
+		
+        // Identify all array fields and find max length
+        maxLen := 0
+        arrayFields := make(map[string][]interface{})
+        
+        // If key_field/value_field provided, check them specifically (legacy support)
+        if keyField != "" && valueField != "" {
+             if kArr, ok := getAsArray(resultMap[keyField]); ok {
+                 arrayFields["key"] = kArr
+                 if len(kArr) > maxLen { maxLen = len(kArr) }
+             }
+             if vArr, ok := getAsArray(resultMap[valueField]); ok {
+                 arrayFields["value"] = vArr
+                 if len(vArr) > maxLen { maxLen = len(vArr) }
+             }
+        }
 
-		// Get the arrays using helper that handles []string and []interface{}
-		keyArray, keyOk := getAsArray(resultMap[keyField])
-		valueArray, valueOk := getAsArray(resultMap[valueField])
+        // Also map all other fields for generic access
+        for k, v := range resultMap {
+            if arr, ok := getAsArray(v); ok {
+                arrayFields[k] = arr
+                if len(arr) > maxLen { maxLen = len(arr) }
+            }
+        }
 
-		fmt.Printf("[Transform] Array check: key='%s' exists=%v len=%d, value='%s' exists=%v len=%d\n", 
-			keyField, keyOk, len(keyArray), valueField, valueOk, len(valueArray))
-
-		if !keyOk || !valueOk {
-			err := fmt.Errorf("key_field '%s' or value_field '%s' not found or not arrays. Available fields: %v", keyField, valueField, getMapKeys(resultMap))
-			fmt.Printf("[Transform] Error: %v\n", err)
-			appendStepResult(ctx.FiberCtx, 0, 0, "Transform", nil, map[string]interface{}{
-				"error": err.Error(),
-			}, false, 0, "")
-			return err
-		}
+        fmt.Printf("[Transform] Found generic arrays. Max len: %d\n", maxLen)
 
 		// Format the message
 		var lines []string
-		maxLen := len(keyArray)
-		if len(valueArray) < maxLen {
-			maxLen = len(valueArray)
-		}
-
 		for i := 0; i < maxLen; i++ {
-			key := fmt.Sprintf("%v", keyArray[i])
-			value := fmt.Sprintf("%v", valueArray[i])
-			
-			// Replace placeholders in format
-			line := strings.ReplaceAll(lineFormat, "{key}", key)
-			line = strings.ReplaceAll(line, "{value}", value)
+			line := messageTemplate
+            
+            // Replace all known array fields
+            for field, arr := range arrayFields {
+                val := ""
+                if i < len(arr) {
+                    val = fmt.Sprintf("%v", arr[i])
+                }
+                
+                // Replace {field} and {{field}}
+                line = strings.ReplaceAll(line, fmt.Sprintf("{%s}", field), val)
+                line = strings.ReplaceAll(line, fmt.Sprintf("{{%s}}", field), val)
+            }
+            
+            // Replace {sep}
 			line = strings.ReplaceAll(line, "{sep}", separator)
-			
 			lines = append(lines, line)
 		}
 

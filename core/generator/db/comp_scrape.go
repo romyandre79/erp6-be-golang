@@ -698,7 +698,7 @@ func applyFilter(data map[string]interface{}, filter string) (map[string]interfa
 
 	var matchIndices []int
 	for i, v := range strs {
-		if strings.EqualFold(strings.TrimSpace(v), filterVal) {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(v)), strings.ToLower(filterVal)) {
 			matchIndices = append(matchIndices, i)
 		}
 	}
@@ -789,3 +789,5 @@ func extractWithRegex(text interface{}, rulesJSON string) (interface{}, error) {
 
 	return results, nil
 }
+
+
