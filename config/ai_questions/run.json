@@ -1,0 +1,24 @@
+{
+        "description": "Run Workflow",
+    "questions": [
+        {
+            "key": "flow_name",
+            "text": "Which workflow/flow do you want to run?",
+            "validation": "required",
+            "description": "Enter the name of the workflow/flow"
+        },
+        {
+            "key": "params",
+            "text": "Any parameters? (JSON format or key=value)",
+            "validation": "optional",
+            "description": "Optional parameters for the flow"
+        }
+    ],
+    "queries": {
+        "default": "{\"flow_name\": \"{{.flow_name}}\", \"params\": \"{{.params}}\"}"
+    },
+    "params": [],
+    "defaults": {},
+    "meta_action": "execute_flow",
+    "success_message": "Request to execute flow '{{.flow_name}}' prepared."
+}

@@ -1,0 +1,44 @@
+{
+        "description": "Create a Widget",
+    "questions": [
+        {
+            "key": "widgetname",
+            "text": "What is the widget name?",
+            "validation": "required",
+            "description": "Enter a unique name for the widget"
+        },
+        {
+            "key": "widgettitle",
+            "text": "What is the widget title?",
+            "validation": "required",
+            "description": "Enter display title"
+        },
+        {
+            "key": "description",
+            "text": "Description?",
+            "validation": "optional",
+            "description": "Enter description"
+        }
+    ],
+    "queries": {
+        "postgres": "INSERT INTO widget (widgetname, widgettitle, widgetversion, widgetby, description, recordstatus, moduleid) VALUES ($1, $2, '1.0.0', 'AI Assistant', $3, 1, 1) RETURNING widgetid",
+        "sqlserver": "INSERT INTO widget (widgetname, widgettitle, widgetversion, widgetby, description, recordstatus, moduleid) VALUES (?, ?, '1.0.0', 'AI Assistant', ?, 1, 1); SELECT SCOPE_IDENTITY();",
+        "oracle": "INSERT INTO widget (widgetname, widgettitle, widgetversion, widgetby, description, recordstatus, moduleid) VALUES (:1, :2, '1.0.0', 'AI Assistant', :3, 1, 1) RETURNING widgetid INTO :4",
+        "sqlite": "INSERT INTO widget (widgetname, widgettitle, widgetversion, widgetby, description, recordstatus, moduleid) VALUES (?, ?, '1.0.0', 'AI Assistant', ?, 1, 1)",
+        "mysql": "INSERT INTO widget (widgetname, widgettitle, widgetversion, widgetby, description, recordstatus, moduleid) VALUES (?, ?, '1.0.0', 'AI Assistant', ?, 1, 1)"
+    },
+    "list_queries": {
+        "mysql": "SELECT widgetid, widgetname, widgettitle FROM widget WHERE recordstatus = 1 ORDER BY widgetname LIMIT 20",
+        "sqlserver": "SELECT TOP 20 widgetid, widgetname, widgettitle FROM widget WHERE recordstatus = 1 ORDER BY widgetname"
+    },
+    "params": [
+        "widgetname",
+        "widgettitle",
+        "description"
+    ],
+    "defaults": {
+        "widgettitle": "{{.widgetname}}",
+        "description": "Created via AI Assistant"
+    },
+    "success_message": "Widget '{{.widgetname}}' created successfully!"
+}

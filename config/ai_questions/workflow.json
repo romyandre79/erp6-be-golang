@@ -1,0 +1,50 @@
+{
+        "description": "Create a Workflow",
+    "questions": [
+        {
+            "key": "wfname",
+            "text": "What is the workflow name?",
+            "validation": "required",
+            "description": "Enter a name for the workflow (e.g., 'Purchase Order Approval')"
+        },
+        {
+            "key": "wfdesc",
+            "text": "What is the workflow description?",
+            "validation": "required",
+            "description": "Describe the purpose of this workflow"
+        },
+        {
+            "key": "wfminstat",
+            "text": "What Min Status workflow?",
+            "validation": "required",
+            "description": "Enter min status"
+        },
+        {
+            "key": "wfmaxstat",
+            "text": "What Max Status workflow?",
+            "validation": "optional",
+            "description": "Enter max status"
+        },
+        {
+            "key": "flow",
+            "text": "What workflow do you want copy?",
+            "validation": "optional",
+            "description": "Enter workflow to copy"
+        }
+    ],
+    "queries": {
+        "postgres": "INSERT INTO workflow (wfname, wfdesc, recordstatus) VALUES ($1, $2, 1) RETURNING workflowid",
+        "sqlserver": "INSERT INTO workflow (wfname, wfdesc, recordstatus) VALUES (?, ?, 1); SELECT SCOPE_IDENTITY();",
+        "oracle": "INSERT INTO workflow (wfname, wfdesc, recordstatus) VALUES (:1, :2, 1) RETURNING workflowid INTO :3",
+        "sqlite": "INSERT INTO workflow (wfname, wfdesc, recordstatus) VALUES (?, ?, 1)",
+        "mysql": "INSERT INTO workflow (wfname, wfdesc, recordstatus) VALUES (?, ?, 1)"
+    },
+    "params": [
+        "wfname",
+        "wfdesc"
+    ],
+    "defaults": {
+        "wfdesc": "Created via AI Assistant"
+    },
+    "success_message": "Workflow '{{.wfname}}' created successfully!"
+}

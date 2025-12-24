@@ -58,6 +58,25 @@ func handleWorkflow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, se
 			}
 		}
 
+
+		// PROPAGATION FIX: Merge variables from parent workflow execution context
+		// This ensures sub-workflow has access to all previously resolved variables (e.g. $action, $url)
+		parentExecParams := c.Locals("wfEngine")
+		if parentExecParams != nil {
+			if pWfEngine, ok := parentExecParams.([]WorkflowEngine); ok {
+				for _, node := range pWfEngine {
+					if nodeMap, ok := node.ResultNode.(map[string]interface{}); ok {
+						for k, v := range nodeMap {
+							// Only set if not already defined strictly by parameters
+							if _, exists := flowParams[k]; !exists {
+								flowParams[k] = v
+							}
+						}
+					}
+				}
+			}
+		}
+
 		fmt.Printf("[Workflow] Executing workflow: '%s' with params: %+v\n", wfName, flowParams)
 		
 		// Set flag to indicate nested workflow execution

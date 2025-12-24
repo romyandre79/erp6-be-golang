@@ -1,0 +1,24 @@
+{
+    "questions": [
+        {
+            "key": "city",
+            "text": "For what city (kota)? (e.g. Surabaya)",
+            "validation": "required",
+            "description": "City name for weather lookup"
+        }
+    ],
+    "queries": {
+        "default": "{\"url\": \"https://openweathermap.org/find?q={{.city}}\", \"detail_url\": \"https://openweathermap.org$href\", \"method\": \"browser\", \"user_agent\": \"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36\", \"action\": \"extract_links\", \"wait_time\": \"5000\", \"selector\": \"div#forecast-list tr td:nth-child(2) b a\", \"detail_action\": \"extract_one_data\", \"detail_extraction_rules\": \"{\\\"city\\\": \\\"div#weather-widget h2\\\", \\\"temp\\\": \\\".current-container .heading\\\", \\\"condition\\\": \\\".current-container .bold\\\", \\\"humidity\\\": \\\".current-container li:contains(\\\\\\\"Humidity\\\\\\\")\\\", \\\"wind\\\": \\\".current-container .wind-line\\\", \\\"pressure\\\": \\\".current-container li:has(.icon-pressure)\\\", \\\"visibility\\\": \\\".current-container li:contains(\\\\\\\"Visibility\\\\\\\")\\\"}\"}"
+    },
+    "params": [],
+    "defaults": {
+        "city": "surabaya"
+    },
+    "description": "Scrape Weather",
+    "meta_action": "weather",
+    "success_message": "Scraping request for {{.city}} sent!",
+    "triggers": [
+        "weather",
+        "cuaca"
+    ]
+}

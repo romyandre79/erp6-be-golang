@@ -517,8 +517,8 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 		return nil
 	}
 
-	// Handle Decision flow
-	if strings.EqualFold(component.Name, "Decision") || strings.EqualFold(component.Name, "auth") {
+	// Handle Decision and Loop flow
+	if strings.EqualFold(component.Name, "Decision") || strings.EqualFold(component.Name, "auth") || strings.EqualFold(component.Name, "For Each") {
 		var outputs IO
 		if ctx.DecisionResult {
 			outputs = component.Outputs["output_1"]
@@ -559,6 +559,10 @@ func InternalFlow(c *fiber.Ctx, component Component, workflowId int, nodeId int,
 // This allows subsequent nodes to access results via ResolveParam($variable).
 // Also broadcasts WebSocket updates to the frontend for live visualization.
 func appendStepResult(c *fiber.Ctx, workflowId int, nodeId int, componentName string, input any, result any, success bool, execTime float64, errMsg string) {
+	// Persistent Debug Logging (Production Safe)
+	fmt.Printf("[Workflow Debug] Node: %s (ID: %d) | Input: %+v | Result: %+v | Success: %v | Error: %s\n", 
+		componentName, nodeId, input, result, success, errMsg)
+
 	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
 	wfEngine = append(wfEngine, WorkflowEngine{
 		WorkflowId:    workflowId,
@@ -825,27 +829,37 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool, params
 // subsequent nodes can use $action and $url to access these values.
 func ResolveParam(c *fiber.Ctx, val string) string {
 	// Handle embedded variables like: https://example.com?q=$city_name
+	// Supports recursive resolution (up to 5 levels)
 	if strings.Contains(val, "$") {
 		result := val
-		// Find all $variable patterns
-		re := regexp.MustCompile(`\$([a-zA-Z_][a-zA-Z0-9_]*)`)
-		matches := re.FindAllStringSubmatch(val, -1)
+		for i := 0; i < 5; i++ { // limit recursion
+			if !strings.Contains(result, "$") {
+				break
+			}
 
-		for _, match := range matches {
-			if len(match) >= 2 {
-				varName := match[1]
-				varValue := resolveVariable(c, varName)
-				// Replace $varName with resolved value
-				result = strings.ReplaceAll(result, "$"+varName, varValue)
+			// Find all $variable patterns
+			re := regexp.MustCompile(`\$([a-zA-Z_][a-zA-Z0-9_]*)`)
+			matches := re.FindAllStringSubmatch(result, -1)
+
+			changed := false
+			for _, match := range matches {
+				if len(match) >= 2 {
+					varName := match[1]
+					varValue := resolveVariable(c, varName)
+
+					// Only replace if value is different (prevent infinite loops with unresolved vars)
+					if varValue != "$"+varName {
+						result = strings.ReplaceAll(result, "$"+varName, varValue)
+						changed = true
+					}
+				}
+			}
+
+			if !changed {
+				break
 			}
 		}
 		return result
-	}
-
-	// Original behavior for simple $variable
-	if strings.HasPrefix(val, "$") {
-		key := strings.TrimPrefix(val, "$")
-		return resolveVariable(c, key)
 	}
 
 	return val
@@ -866,6 +880,13 @@ func resolveVariable(c *fiber.Ctx, key string) string {
 	// 2.5 Check Scoped Params (from Iterator/Schedule)
 	if scopedParams, ok := c.Locals("scopedParams").(map[string]interface{}); ok {
 		if v, exists := scopedParams[key]; exists {
+			return fmt.Sprintf("%v", v)
+		}
+	}
+
+	// 2.6 Check Extras (from For Each / Manual Set)
+	if extras, ok := c.Locals("wfExtras").(map[string]interface{}); ok {
+		if v, exists := extras[key]; exists {
 			return fmt.Sprintf("%v", v)
 		}
 	}

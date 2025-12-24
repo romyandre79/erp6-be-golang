@@ -55,6 +55,7 @@ func handleTransform(ctx *WorkflowContext) error {
 	
 	// Debug logging
 	fmt.Printf("[Transform] Transform type: '%s', Input type: %T\n", transformType, lastResult.ResultNode)
+	fmt.Printf("[Transform] Params: key_field='%s', value_field='%s', separator='%s'\n", keyField, valueField, separator)
 	
 	// Special handling: if input is an array and transform_type is array_to_first, convert it
 	if arr, isArray := lastResult.ResultNode.([]interface{}); isArray && transformType == "array_to_first" {
@@ -80,6 +81,15 @@ func handleTransform(ctx *WorkflowContext) error {
 			}, false, 0, "")
 			return err
 		}
+
+		// Check for nested "result" map (from Scraper wrapper)
+		if nestedResult, ok := resultMap["result"].(map[string]interface{}); ok {
+			fmt.Println("[Transform] Detected nested 'result' map, unpacking...")
+			// Merge nested result into top level or just use it?
+			// Let's use it as the primary map, but maybe keep original keys if needed?
+			// For transform purposes (accessing fields), using the nested map is usually what we want.
+			resultMap = nestedResult
+		}
 	}
 
 	var result map[string]interface{}
@@ -89,7 +99,7 @@ func handleTransform(ctx *WorkflowContext) error {
 		// Convert all arrays to their first element
 		result = make(map[string]interface{})
 		for key, value := range resultMap {
-			if arr, ok := value.([]interface{}); ok && len(arr) > 0 {
+			if arr, ok := getAsArray(value); ok && len(arr) > 0 {
 				// If the first element is a map, flatten it to top level
 				if firstMap, isMap := arr[0].(map[string]interface{}); isMap {
 					// Flatten: copy all fields from the first element to result
@@ -132,6 +142,7 @@ func handleTransform(ctx *WorkflowContext) error {
 		}
 
 	case "format_array":
+		fmt.Println("[Transform] Processing format_array...")
 		// Format two parallel arrays into a message (like currency = rate)
 		// Defaults
 		if separator == "" {
@@ -142,12 +153,16 @@ func handleTransform(ctx *WorkflowContext) error {
 			lineFormat = "{key}{sep}{value}"
 		}
 
-		// Get the arrays
-		keyArray, keyOk := resultMap[keyField].([]interface{})
-		valueArray, valueOk := resultMap[valueField].([]interface{})
+		// Get the arrays using helper that handles []string and []interface{}
+		keyArray, keyOk := getAsArray(resultMap[keyField])
+		valueArray, valueOk := getAsArray(resultMap[valueField])
+
+		fmt.Printf("[Transform] Array check: key='%s' exists=%v len=%d, value='%s' exists=%v len=%d\n", 
+			keyField, keyOk, len(keyArray), valueField, valueOk, len(valueArray))
 
 		if !keyOk || !valueOk {
 			err := fmt.Errorf("key_field '%s' or value_field '%s' not found or not arrays. Available fields: %v", keyField, valueField, getMapKeys(resultMap))
+			fmt.Printf("[Transform] Error: %v\n", err)
 			appendStepResult(ctx.FiberCtx, 0, 0, "Transform", nil, map[string]interface{}{
 				"error": err.Error(),
 			}, false, 0, "")
@@ -187,6 +202,14 @@ func handleTransform(ctx *WorkflowContext) error {
 	fmt.Printf("[Transform] Output result: %+v\n", result)
 	appendStepResult(ctx.FiberCtx, 0, 0, "Transform", nil, result, true, 0, "")
 
+	// Append result to workflow engine
+	wm := WorkflowEngine{
+		ResultNode: result,
+	}
+	wfEngine, _ = ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine)
+	wfEngine = append(wfEngine, wm)
+	ctx.FiberCtx.Locals("wfEngine", wfEngine)
+
 	return nil
 }
 
@@ -196,4 +219,29 @@ func getMapKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// getAsArray safely converts generic interface to []interface{}
+// Handles []interface{}, []string, and single values (wrapping them)
+func getAsArray(val interface{}) ([]interface{}, bool) {
+	if val == nil {
+		return nil, false
+	}
+
+	switch v := val.(type) {
+	case []interface{}:
+		return v, true
+	case []string:
+		// Convert []string to []interface{}
+		res := make([]interface{}, len(v))
+		for i, s := range v {
+			res[i] = s
+		}
+		return res, true
+	case string:
+		// Treat single string as array of 1
+		return []interface{}{v}, true
+	default:
+		return nil, false
+	}
 }

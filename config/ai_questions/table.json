@@ -1,0 +1,39 @@
+{
+        "description": "Create a table",
+    "questions": [
+        {
+            "key": "tablename",
+            "text": "What is the table name?",
+            "validation": "required",
+            "description": "Enter table name (lowercase, use underscores)"
+        },
+        {
+            "key": "columns",
+            "text": "What columns should the table have?",
+            "validation": "required",
+            "description": "Enter columns in format: name:type, name:type (e.g., 'id:int, name:varchar(100), created_at:timestamp')"
+        },
+        {
+            "key": "primarykey",
+            "text": "What is the primary key?",
+            "validation": "optional",
+            "description": "Enter primary key column name (default: first column)"
+        },
+        {
+            "key": "indexes",
+            "text": "What indexes should be created?",
+            "validation": "optional",
+            "description": "Enter index columns separated by comma (e.g., 'name, email')"
+        }
+    ],
+    "queries": {
+        "postgres": "CREATE TABLE IF NOT EXISTS {{.tablename}} ({{.column_defs}})",
+        "sqlserver": "CREATE TABLE IF NOT EXISTS {{.tablename}} ({{.column_defs}})",
+        "oracle": "CREATE TABLE IF NOT EXISTS {{.tablename}} ({{.column_defs}})",
+        "sqlite": "CREATE TABLE IF NOT EXISTS {{.tablename}} ({{.column_defs}})",
+        "mysql": "CREATE TABLE IF NOT EXISTS {{.tablename}} ({{.column_defs}})"
+    },
+    "params": [],
+    "defaults": {},
+    "success_message": "Table '{{.tablename}}' created successfully!"
+}

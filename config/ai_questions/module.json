@@ -1,0 +1,45 @@
+{
+        "description": "Create a Module",
+    "questions": [
+        {
+            "key": "modulename",
+            "text": "What is the module name?",
+            "validation": "required",
+            "description": "Enter a unique name for the module (e.g., 'Sales', 'Inventory')"
+        },
+        {
+            "key": "moduledesc",
+            "text": "What is the module description?",
+            "validation": "required",
+            "description": "Provide a brief description of the module's purpose"
+        },
+        {
+            "key": "moduleversion",
+            "text": "What is the module version?",
+            "validation": "optional",
+            "description": "Enter version number (default: 1.0.0)"
+        },
+        {
+            "key": "createdby",
+            "text": "Who Create this?",
+            "validation": "optional",
+            "description": "Enter created by (e.g., 'Business', 'Operations')"
+        }
+    ],
+    "queries": {
+        "postgres": "INSERT INTO module (modulename, moduledesc, moduleversion, recordstatus) VALUES ($1, $2, $3, 1) RETURNING moduleid",
+        "sqlserver": "INSERT INTO module (modulename, moduledesc, moduleversion, recordstatus) VALUES (?, ?, ?, 1); SELECT SCOPE_IDENTITY();",
+        "oracle": "INSERT INTO module (modulename, moduledesc, moduleversion, recordstatus) VALUES (:1, :2, :3, 1) RETURNING moduleid INTO :4",
+        "sqlite": "INSERT INTO module (modulename, moduledesc, moduleversion, recordstatus) VALUES (?, ?, ?, 1)",
+        "mysql": "INSERT INTO module (modulename, moduledesc, moduleversion, recordstatus) VALUES (?, ?, ?, 1)"
+    },
+    "params": [
+        "modulename",
+        "moduledesc",
+        "moduleversion"
+    ],
+    "defaults": {
+        "moduleversion": "1.0.0"
+    },
+    "success_message": "Module '{{.modulename}}' created successfully!"
+}

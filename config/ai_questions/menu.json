@@ -1,0 +1,88 @@
+{
+    "description": "Create a Menu",
+    "questions": [
+        {
+            "key": "modulename",
+            "text": "Which module does this menu belong to?",
+            "validation": "required",
+            "options_query": "SELECT modulename FROM module ORDER BY modulename ASC",
+            "description": "Enter the module name (e.g., 'Sales', 'Inventory')"
+        },
+        {
+            "key": "menuname",
+            "text": "What is the menu name?",
+            "validation": "required",
+            "description": "Enter a display name for the menu (e.g., 'Customer Management')"
+        },
+        {
+            "key": "menucode",
+            "text": "What is the menu code?",
+            "validation": "optional",
+            "description": "Enter a unique code (will be auto-generated from name if not provided)"
+        },
+        {
+            "key": "menutype",
+            "text": "What type of menu is this?",
+            "validation": "required",
+            "options": [
+                "list",
+                "form",
+                "dashboard",
+                "report"
+            ],
+            "description": "Select the menu type"
+        },
+        {
+            "key": "menuicon",
+            "text": "What icon should be used?",
+            "validation": "optional",
+            "description": "Enter Font Awesome icon class (e.g., 'fa-users', 'fa-chart-bar')"
+        },
+        {
+            "key": "sortorder",
+            "text": "What is the sort order?",
+            "validation": "optional",
+            "description": "Enter a number for menu ordering (default: 99)"
+        },
+        {
+            "key": "description",
+            "text": "What is the menu description?",
+            "validation": "optional",
+            "description": "Provide a brief description of this menu's purpose"
+        },
+        {
+            "key": "menuform",
+            "text": "What menu do you want copy?",
+            "validation": "optional",
+            "description": "Provide other menu to copy"
+        }
+    ],
+    "queries": {
+        "postgres": "INSERT INTO menuaccess (menuname, menucode, menutype, menuicon, sortorder, description, recordstatus, moduleid) VALUES ($1, $2, $3, $4, $5, $6, 1, (SELECT moduleid FROM module WHERE modulename = $7 LIMIT 1)) RETURNING menuaccessid",
+        "sqlserver": "INSERT INTO menuaccess (menuname, menucode, menutype, menuicon, sortorder, description, recordstatus, moduleid) VALUES (?, ?, ?, ?, ?, ?, 1, (SELECT TOP 1 moduleid FROM module WHERE modulename = ?)); SELECT SCOPE_IDENTITY();",
+        "oracle": "INSERT INTO menuaccess (menuname, menucode, menutype, menuicon, sortorder, description, recordstatus, moduleid) VALUES (:1, :2, :3, :4, :5, :6, 1, (SELECT moduleid FROM module WHERE modulename = :7 AND ROWNUM = 1)) RETURNING menuaccessid INTO :8",
+        "sqlite": "INSERT INTO menuaccess (menuname, menucode, menutype, menuicon, sortorder, description, recordstatus, moduleid) VALUES (?, ?, ?, ?, ?, ?, 1, (SELECT moduleid FROM module WHERE modulename = ? LIMIT 1))",
+        "mysql": "INSERT INTO menuaccess (menuname, menucode, menutype, menuicon, sortorder, description, recordstatus, moduleid) VALUES (?, ?, ?, ?, ?, ?, 1, (SELECT moduleid FROM module WHERE modulename = ? LIMIT 1))"
+    },
+    "list_queries": {
+        "mysql": "SELECT menuaccessid, menuname, menucode FROM menuaccess WHERE recordstatus = 1 ORDER BY menuname LIMIT 20",
+        "sqlserver": "SELECT TOP 20 menuaccessid, menuname, menucode FROM menuaccess WHERE recordstatus = 1 ORDER BY menuname"
+    },
+    "params": [
+        "menuname",
+        "menucode",
+        "menutype",
+        "menuicon",
+        "sortorder",
+        "description",
+        "modulename"
+    ],
+    "defaults": {
+        "menucode": "{{.menuname_slug}}",
+        "menutype": "list",
+        "menuicon": "fa-file",
+        "sortorder": "99",
+        "description": "Created via AI Assistant"
+    },
+    "success_message": "Menu '{{.menuname}}' created successfully in module '{{.modulename}}'!"
+}

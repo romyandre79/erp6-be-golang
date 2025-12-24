@@ -1,0 +1,43 @@
+{
+    "description": "Run a Report",
+    "triggers": [
+        "report",
+        "print report",
+        "generate report",
+        "i want report",
+        "show report"
+    ],
+    "questions": [
+        {
+            "key": "report_name",
+            "text": "Which report do you want to run?",
+            "validation": "required",
+            "description": "Name of the report (e.g., Balance Sheet)"
+        },
+        {
+            "key": "report_type",
+            "text": "What format? (PDF, XLS, CSV)",
+            "validation": "optional",
+            "options": [
+                "PDF",
+                "XLS",
+                "CSV"
+            ],
+            "description": "Output format"
+        },
+        {
+            "key": "params",
+            "text": "Any extra parameters?",
+            "validation": "optional",
+            "description": "Additional filters (e.g., date=today)"
+        }
+    ],
+    "queries": {
+        "default": "{\"flow_name\": \"systemreport\", \"params\": \"reportname={{.report_name}},reporttype={{.report_type|default:'PDF'}},parameter={{.params}}\"}"
+    },
+    "defaults": {
+        "report_type": "PDF"
+    },
+    "meta_action": "execute_flow",
+    "success_message": "Generating {{.report_type}} report '{{.report_name}}'..."
+}

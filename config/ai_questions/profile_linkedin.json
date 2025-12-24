@@ -1,0 +1,23 @@
+{
+    "questions": [
+        {
+            "key": "keyword",
+            "text": "Who are you looking for on LinkedIn? (e.g. Bill Gates)",
+            "validation": "required",
+            "description": "Name or role to search for"
+        }
+    ],
+    "queries": {
+        "default": "{\"url\": \"https://www.google.com/search?q=site:linkedin.com/in/+{{.keyword}}\", \"method\": \"browser\", \"action\": \"extract_links\", \"wait_time\": \"3000\", \"selector\": \"#search .g a\"}"
+    },
+    "params": [],
+    "defaults": {
+        "keyword": "Bill Gates"
+    },
+    "description": "Search LinkedIn Profiles (via Google)",
+    "meta_action": "profile_linkedin",
+    "success_message": "Searching LinkedIn profiles for {{.keyword}}...",
+    "triggers": [
+        "profile linkedin"
+    ]
+}
