@@ -10,12 +10,13 @@ import (
 
 // SaveChatMessage persists a chat message to the database
 // SaveChatMessage persists a chat message to the database
-func SaveChatMessage(db *gorm.DB, senderID, receiverID int, message, attachment string) error {
+func SaveChatMessage(db *gorm.DB, senderID, receiverID int, message, attachment string, filesize int) error {
 	chatLog := models.Chat{
 		SenderID:   senderID,
 		ReceiverID: receiverID,
 		Message:    message,
 		Attachment: attachment,
+		Filesize:   filesize,
 		IsRead:     0,
 		CreatedAt:  time.Now(),
 	}

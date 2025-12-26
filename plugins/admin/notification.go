@@ -63,10 +63,18 @@ func WebSocketHandler(c *websocket.Conn) {
 				if err := json.Unmarshal(payload.Data, &dataMap); err == nil {
 					if text, ok := dataMap["text"].(string); ok {
 						attachment, _ := dataMap["attachment"].(string)
+						// Helper for safe int casting from JSON float64
+						var filesize int
+						if val, ok := dataMap["filesize"].(float64); ok {
+							filesize = int(val)
+						} else if val, ok := dataMap["filesize"].(int); ok {
+							filesize = val
+						}
+
 						// Get DB instance from somewhere - we need to pass it
 						// For now, use a global or inject it. Let's use a package-level var.
 						if GlobalDB != nil {
-							go SaveChatMessage(GlobalDB, useraccessid, payload.TargetID, text, attachment)
+							go SaveChatMessage(GlobalDB, useraccessid, payload.TargetID, text, attachment, filesize)
 						}
 					}
 				}

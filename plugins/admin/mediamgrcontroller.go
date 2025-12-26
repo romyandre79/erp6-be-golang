@@ -60,8 +60,12 @@ func (m *MediaController) UploadMedia(c *fiber.Ctx) error {
 	}
 
 	files := form.File["file"]
+	if len(files) == 0 {
+		return c.Status(400).JSON(fiber.Map{"error": "No files received"})
+	}
 	path := c.FormValue("path", "")
 	saveDir := filepath.Join(m.RootPath, path)
+	fmt.Printf("DEBUG: UploadMedia path='%s' root='%s' saveDir='%s' files=%d\n", path, m.RootPath, saveDir, len(files))
 	os.MkdirAll(saveDir, os.ModePerm)
 
 	for _, file := range files {

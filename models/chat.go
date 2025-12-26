@@ -9,6 +9,7 @@ type Chat struct {
 	Message    string    `gorm:"column:message;type:text" json:"message"`
 	IsRead     int       `gorm:"column:isread;default:0" json:"is_read"` // 0: Unread, 1: Read
 	Attachment string    `gorm:"column:attachment;type:text" json:"attachment"`
+	Filesize   int       `gorm:"column:filesize" json:"filesize"`
 	CreatedAt  time.Time `gorm:"column:createdat" json:"created_at"`
 }
 

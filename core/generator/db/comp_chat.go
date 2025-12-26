@@ -2,6 +2,7 @@ package generator
 
 import (
 	"encoding/json"
+	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/core/ws"
 	"erp6-be-golang/models"
 	"fmt"
@@ -140,22 +141,6 @@ func handleChat(ctx *WorkflowContext) error {
 			return err
 		}
 
-		// Store result in context so next node can use it (or End node returns it)
-		// Usually InternalFlow puts result in wfEngine. We just return it via some mechanism?
-		// The ComponentHandler signature only returns error. 
-		// But in executeflow.go, it looks at where?
-		// Ah, standard components don't easily "return" data unless they write to Locals or specific structs.
-		// Wait, external runner wrote to wfEngine.
-		// Let's see how `comp_decision` or others do it.
-		// `comp_table` writes to `c.Locals("query_result", ...)` or returns map.
-		
-		// Wait, the interface is `Execute(ctx) error`.
-		// But `InternalFlow` uses the return? No.
-		// `InternalFlow` captures `err`.
-		
-		// Let's look at `external_runner.go` again.
-		// It manually appends to `wfEngine` in Locals.
-		
 		wm := WorkflowEngine{
 			ResultNode:    chats,
 		}
@@ -164,7 +149,7 @@ func handleChat(ctx *WorkflowContext) error {
 		wfEngine = append(wfEngine, wm)
 		ctx.FiberCtx.Locals("wfEngine", wfEngine)
 
-		return nil
+		return helpers.SuccessResponse(ctx.FiberCtx, "DATA RETRIEVED", chats)
 
 	case "markread":
 		if msgID == 0 {
@@ -189,7 +174,7 @@ func handleChat(ctx *WorkflowContext) error {
 		}
 		
 		// Return specific fields
-		var result []map[string]interface{}
+		result := []map[string]interface{}{}
 		for _, u := range users {
 			photo := u.Userphoto
 			if photo == "" { photo = "" } // Ensure string
@@ -211,7 +196,7 @@ func handleChat(ctx *WorkflowContext) error {
 		wfEngine = append(wfEngine, wm)
 		ctx.FiberCtx.Locals("wfEngine", wfEngine)
 		
-		return nil
+		return helpers.SuccessResponse(ctx.FiberCtx, "DATA RETRIEVED", result)
 
 	default:
 		return fmt.Errorf("unknown action: %s", action)

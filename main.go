@@ -188,10 +188,21 @@ func main() {
 		return plugin.WebhookHandler(c, db)
 	})
 
-	app.Static("/", "./public")
+	app.Use(func(c *fiber.Ctx) error {
+		// Serve static files from public directory
+		path := c.Path()
+		if !strings.HasPrefix(path, "/api/") {
+			// Try to serve static file
+			filePath := filepath.Join("./public", path)
+			if _, err := os.Stat(filePath); err == nil {
+				return c.SendFile(filePath)
+			}
+		}
+		return c.Next()
+	})
 
 	app.Get("*", func(c *fiber.Ctx) error {
-		// Only serve index.html for non-API routes
+		// Only serve index.html for non-API routes and non-static files
 		if strings.HasPrefix(c.Path(), "/api/") {
 			return c.SendStatus(fiber.StatusNotFound)
 		}
