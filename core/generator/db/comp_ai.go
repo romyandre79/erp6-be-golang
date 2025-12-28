@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
+	"sort"
 	"text/template"
 
 	"gorm.io/gorm"
@@ -49,6 +48,7 @@ type AIQuestion struct {
 type AIEntityInfo struct {
 	Name        string
 	Description string
+	Triggers    string
 }
 
 func init() {
@@ -134,12 +134,12 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 
 	// Check if this is a help command
 	if strings.HasPrefix(lowerCmd, "help") {
-		availableEntities := getAvailableEntities()
+		availableEntities := getAvailableEntities(db)
 
 		var helpMsg strings.Builder
 		helpMsg.WriteString("Available commands:\n")
 		for _, entity := range availableEntities {
-			helpMsg.WriteString(fmt.Sprintf("• %s - %s\n", entity.Name, entity.Description))
+			helpMsg.WriteString(fmt.Sprintf("• %s - %s\n", entity.Triggers, entity.Description))
 		}
 		helpMsg.WriteString("• help - Show this help\n")
 		helpMsg.WriteString("• get data [table] - Show data from a table (e.g., 'get data customer')")
@@ -159,18 +159,23 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 				if err != nil {
 					return map[string]interface{}{"error": err.Error()}, nil // Return error as map to be nice?
 				}
-				return map[string]interface{}{"result": result}, nil
+				
+				response := map[string]interface{}{"result": result}
+				if list, ok := result.([]map[string]interface{}); ok {
+					response["message"] = formatDataAsTable(list)
+				}
+				
+				return response, nil
 			}
 		}
 	}
-
 	// Continue existing conversation
 	if state.EntityType != "" {
 		return runConversationStep(command, state, dbDriver, userID, "", "", db)
 	}
 
 	// New Conversation Logic
-	availableEntities := getAvailableEntities()
+	availableEntities := getAvailableEntities(db)
 	matchedEntity := ""
 	initialArg := ""
 	isListCommand := false
@@ -222,7 +227,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 
 	if matchedEntity != "" {
 		if isListCommand {
-			result, err := generateListQuery(matchedEntity, dbDriver)
+			result, err := generateListQuery(matchedEntity, dbDriver, db)
 			if err != nil {
 				return nil, err
 			}
@@ -234,7 +239,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 
 	// Triggers
 	for _, entity := range availableEntities {
-		flow, err := getQuestionFlow(entity.Name)
+		flow, err := getQuestionFlow(db, entity.Name)
 		if err == nil && len(flow.Triggers) > 0 {
 			for _, trigger := range flow.Triggers {
 				if strings.Contains(lowerCmd, strings.ToLower(trigger)) {
@@ -244,7 +249,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 			}
 		}
 	}
-
+	
 	// Unknown
 	return map[string]interface{}{
 		"execute": "false",
@@ -252,6 +257,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 		"user_id": userID,
 	}, nil
 }
+
 
 func runConversationStep(command string, state AIConversationState, dbDriver, userID, matchedEntity, initialArg string, db *gorm.DB) (map[string]interface{}, error) {
 	lowerCmd := strings.ToLower(command)
@@ -273,7 +279,7 @@ func runConversationStep(command string, state AIConversationState, dbDriver, us
 		}
 	}
 
-	flow, err := getQuestionFlow(state.EntityType)
+	flow, err := getQuestionFlow(db, state.EntityType)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +295,7 @@ func runConversationStep(command string, state AIConversationState, dbDriver, us
 	if state.WaitingConfirmation {
 		if lowerCmd == "execute" || lowerCmd == "yes" || lowerCmd == "confirm" {
 			state.IsComplete = true
-			query, params, reply, metaAction, err := generateQueryFromData(state.EntityType, state.CollectedData, dbDriver, userID)
+			query, params, reply, metaAction, err := generateQueryFromData(state.EntityType, state.CollectedData, dbDriver, userID, db)
 			if err != nil {
 				return nil, err
 			}
@@ -334,7 +340,7 @@ func runConversationStep(command string, state AIConversationState, dbDriver, us
 			}, nil
 		} else {
 			stateBytes, _ := json.Marshal(state)
-			summary := buildSummary(state.EntityType, state.CollectedData)
+			summary := buildSummary(db, state.EntityType, state.CollectedData)
 			return map[string]interface{}{
 				"execute":              "false",
 				"message":              fmt.Sprintf("Invalid response. Please type:\n• 'execute' to proceed\n• 'review' to see all questions and answers\n• 'cancel' to abort\n\n%s", summary),
@@ -420,7 +426,7 @@ func runConversationStep(command string, state AIConversationState, dbDriver, us
 	// Summary and Confirm
 	state.WaitingConfirmation = true
 	stateBytes, _ := json.Marshal(state)
-	summary := buildSummary(state.EntityType, state.CollectedData)
+	summary := buildSummary(db, state.EntityType, state.CollectedData)
 
 	return map[string]interface{}{
 		"execute":              "false",
@@ -434,60 +440,74 @@ func runConversationStep(command string, state AIConversationState, dbDriver, us
 
 // -- Helpers --
 
-func getQuestionFlow(entityType string) (*AIQuestionFlow, error) {
-	// PATH: config/ai_questions/*.json
-	baseDir := "config/ai_questions"
-	jsonPath := filepath.Join(baseDir, fmt.Sprintf("%s.json", entityType))
+// AICommand represents the database structure for AI commands
+type AICommand struct {
+	AICommandID    int    `gorm:"primaryKey;column:aicommandid"`
+	Name           string `gorm:"column:name"`
+	Description    string `gorm:"column:description"`
+	Questions      string `gorm:"column:questions"`
+	Queries        string `gorm:"column:queries"`
+	Params         string `gorm:"column:params"`
+	Defaults       string `gorm:"column:defaults"`
+	MetaAction     string `gorm:"column:metaaction"`
+	SuccessMessage string `gorm:"column:successmessage"`
+	Triggers       string `gorm:"column:triggers"`
+}
 
-	data, err := os.ReadFile(jsonPath)
-	if err != nil {
-		// Fallback check executable dir
-		ex, _ := os.Executable()
-		exDef := filepath.Join(filepath.Dir(ex), "config/ai_questions", fmt.Sprintf("%s.json", entityType))
-		data, err = os.ReadFile(exDef)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load configuration for '%s' from %s: %v", entityType, jsonPath, err)
-		}
+// TableName overrides the table name used by User to `aicommand`
+func (AICommand) TableName() string {
+	return "aicommand"
+}
+
+func getQuestionFlow(db *gorm.DB, entityType string) (*AIQuestionFlow, error) {
+	var cmd AICommand
+	if err := db.Where("name = ?", entityType).First(&cmd).Error; err != nil {
+		return nil, fmt.Errorf("command '%s' not found: %v", entityType, err)
 	}
 
 	var flow AIQuestionFlow
-	if err := json.Unmarshal(data, &flow); err != nil {
-		return nil, fmt.Errorf("failed to parse configuration for '%s': %v", entityType, err)
-	}
+	flow.Description = cmd.Description
+	flow.MetaAction = cmd.MetaAction
+	flow.SuccessMessage = cmd.SuccessMessage
+
+	// Unmarshal JSON fields
+	json.Unmarshal([]byte(cmd.Questions), &flow.Questions)
+	json.Unmarshal([]byte(cmd.Queries), &flow.Queries)
+	// Handle ListQueries? Struct doesn't have it explicitly, maybe inside Queries or separate?
+	// The DB schema provided didn't have listqueries column. 
+	// Assuming logic needs adaptation or it's part of queries?
+	// For now let's Initialize map
+	if flow.Queries == nil { flow.Queries = make(map[string]string) }
+	
+	json.Unmarshal([]byte(cmd.Params), &flow.Params)
+	json.Unmarshal([]byte(cmd.Defaults), &flow.Defaults)
+	json.Unmarshal([]byte(cmd.Triggers), &flow.Triggers)
+
+	// Defaults for safety
+	if flow.Defaults == nil { flow.Defaults = make(map[string]string) }
+
 	return &flow, nil
 }
 
-func getAvailableEntities() []AIEntityInfo {
-	var entities []AIEntityInfo
-	baseDir := "config/ai_questions"
-
-	files, err := os.ReadDir(baseDir)
-	if err != nil {
-		// Try relative to cwd
-		files, err = os.ReadDir("config/ai_questions")
-		if err != nil {
-			fmt.Printf("[CompAI] Error reading questions dir: %v\n", err)
-			return []AIEntityInfo{}
-		}
+func getAvailableEntities(db *gorm.DB) []AIEntityInfo {
+	var commands []AICommand
+	if err := db.Find(&commands).Error; err != nil {
+		fmt.Printf("[CompAI] Error listing commands: %v\n", err)
+		return []AIEntityInfo{}
 	}
-	
-	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(file.Name(), ".json") {
-			name := strings.TrimSuffix(file.Name(), ".json")
-			description := fmt.Sprintf("Create a %s", name)
-			if flow, err := getQuestionFlow(name); err == nil {
-				if flow.Description != "" {
-					description = flow.Description
-				}
-			}
-			
-			entities = append(entities, AIEntityInfo{Name: name, Description: description})
+
+	var entities []AIEntityInfo
+	for _, cmd := range commands {
+		description := fmt.Sprintf("Create a %s", cmd.Name)
+		if cmd.Description != "" {
+			description = cmd.Description
 		}
+		entities = append(entities, AIEntityInfo{Name: cmd.Name, Description: description})
 	}
 	return entities
 }
 
-func buildSummary(entityType string, data map[string]string) string {
+func buildSummary(db *gorm.DB, entityType string, data map[string]string) string {
 	var summary strings.Builder
 	summary.WriteString("📋 Summary:\n")
 
@@ -496,7 +516,7 @@ func buildSummary(entityType string, data map[string]string) string {
 	// For now, let's iterate to be valid for ANY json file.
 	// But order is random in map.
 	// Let's use the flow to get order?
-	flow, err := getQuestionFlow(entityType)
+	flow, err := getQuestionFlow(db, entityType)
 	if err == nil {
 		for _, q := range flow.Questions {
 			val := data[q.Key]
@@ -527,8 +547,8 @@ func buildDetailedReview(entityType string, data map[string]string, flow *AIQues
 	return review.String()
 }
 
-func generateQueryFromData(entityType string, data map[string]string, dbDriver, userID string) (string, string, string, string, error) {
-	flow, err := getQuestionFlow(entityType)
+func generateQueryFromData(entityType string, data map[string]string, dbDriver, userID string, db *gorm.DB) (string, string, string, string, error) {
+	flow, err := getQuestionFlow(db, entityType)
 	if err != nil {
 		return "", "", "", "", err
 	}
@@ -593,8 +613,8 @@ func processTemplate(tmpl string, data map[string]string) string {
 	return buf.String()
 }
 
-func generateListQuery(entityType, dbDriver string) (map[string]interface{}, error) {
-	flow, err := getQuestionFlow(entityType)
+func generateListQuery(entityType, dbDriver string, db *gorm.DB) (map[string]interface{}, error) {
+	flow, err := getQuestionFlow(db, entityType)
 	if err != nil {
 		return nil, err
 	}
@@ -676,4 +696,48 @@ func handleGetData(db *gorm.DB, tableName string) (interface{}, error) {
 func FuncMapHas(m map[string]string, key string) bool {
     _, ok := m[key]
     return ok
+}
+
+func formatDataAsTable(data []map[string]interface{}) string {
+	if len(data) == 0 {
+		return "No data found."
+	}
+	// Collect all keys
+	keys := make(map[string]bool)
+	var header []string
+	for _, row := range data {
+		for k := range row {
+			if !keys[k] {
+				keys[k] = true
+				header = append(header, k)
+			}
+		}
+	}
+	sort.Strings(header)
+
+	var b strings.Builder
+	// Header
+	for _, h := range header {
+		b.WriteString("| " + h + " ")
+	}
+	b.WriteString("|\n")
+	// Separator
+	for range header {
+		b.WriteString("| --- ")
+	}
+	b.WriteString("|\n")
+	// Rows
+	for _, row := range data {
+		for _, h := range header {
+			val := ""
+			if v, ok := row[h]; ok {
+				val = fmt.Sprintf("%v", v)
+			}
+			// Sanitize newlines
+			val = strings.ReplaceAll(val, "\n", " ")
+			b.WriteString("| " + val + " ")
+		}
+		b.WriteString("|\n")
+	}
+	return b.String()
 }
