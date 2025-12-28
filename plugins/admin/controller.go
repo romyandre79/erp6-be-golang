@@ -219,6 +219,10 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return helpers.FailResponse(c, 401, "INVALID_CONVERSION", err.Error())
 	}
 
+	if debug == "true" {
+		c.Locals("enable_workflow_events", true)
+	}
+
 	err = gendb.ExecuteFlow(c, db, flowName, bSearch, nil)
 	if err != nil {
 		return helpers.FailResponse(c, 401, "INVALID_FLOW", err.Error())

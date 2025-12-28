@@ -593,6 +593,11 @@ func broadcastNodeUpdate(c *fiber.Ctx, eventType string, workflowId int, nodeId 
 		return
 	}
 
+	// Only broadcast if explicitly enabled (e.g. for debugging/testing)
+	if enabled, ok := c.Locals("enable_workflow_events").(bool); !ok || !enabled {
+		return
+	}
+
 	// Get user ID from context
 	userID, ok := c.Locals("userid").(int)
 	if !ok {
