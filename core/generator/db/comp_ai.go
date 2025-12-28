@@ -502,7 +502,13 @@ func getAvailableEntities(db *gorm.DB) []AIEntityInfo {
 		if cmd.Description != "" {
 			description = cmd.Description
 		}
-		entities = append(entities, AIEntityInfo{Name: cmd.Name, Description: description})
+		
+		var triggers []string
+		_ = json.Unmarshal([]byte(cmd.Triggers), &triggers)
+		triggerStr := strings.Join(triggers, ", ")
+		if triggerStr == "" { triggerStr = cmd.Name }
+
+		entities = append(entities, AIEntityInfo{Name: cmd.Name, Description: description, Triggers: triggerStr})
 	}
 	return entities
 }
