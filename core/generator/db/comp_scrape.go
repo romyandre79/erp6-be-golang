@@ -259,6 +259,19 @@ func handleScrape(ctx *WorkflowContext) error {
 	case "solve_captcha":
 		result, err = solveCaptcha(url, captchaAPIKey)
 
+	case "extract_hierarchy":
+		if method == "browser" {
+			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs)
+			if err == nil {
+				result, err = extractHierarchy(getHTMLFromResult(html), extractionRules)
+			}
+		} else {
+			html, err := scrapeWithHTTP(url, userAgent, customHeaders, "html")
+			if err == nil {
+				result, err = extractHierarchy(html.(string), extractionRules)
+			}
+		}
+
 	default:
 		result = map[string]string{"status": "action_not_implemented_yet", "action": action}
 	}
@@ -791,3 +804,147 @@ func extractWithRegex(text interface{}, rulesJSON string) (interface{}, error) {
 }
 
 
+
+func extractHierarchy(html, rulesJSON string) (interface{}, error) {
+	if rulesJSON == "" {
+		return nil, fmt.Errorf("extraction rules required")
+	}
+
+	type FieldDef struct {
+		Selector string `json:"selector"`
+		Context  string `json:"context"` // "root" or "row"
+		Type     string `json:"type"`    // "text", "html", "attr"
+		Attr     string `json:"attr"`
+	}
+	
+	type ComputedField struct {
+		Type      string `json:"type"`       // "date_id_combine"
+		DayKey    string `json:"day_key"`
+		MonthKey  string `json:"month_key"`  // Expects "januari2025"
+		TargetKey string `json:"target_key"`
+	}
+
+	type HierarchyRules struct {
+		RootSelector   string                   `json:"root_selector"`
+		RowSelector    string                   `json:"row_selector"`
+		Fields         map[string]FieldDef      `json:"fields"`
+		ComputedFields []ComputedField          `json:"computed_fields"`
+	}
+
+	var rules HierarchyRules
+	if err := json.Unmarshal([]byte(rulesJSON), &rules); err != nil {
+		return nil, fmt.Errorf("invalid hierarchy rules json: %v", err)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		return nil, err
+	}
+
+	var results []map[string]interface{}
+	
+	// Indonesian month mapping
+	idMonths := map[string]string{
+		"januari": "January", "februari": "February", "maret": "March",
+		"april": "April", "mei": "May", "juni": "June",
+		"juli": "July", "agustus": "August", "september": "September",
+		"oktober": "October", "november": "November", "desember": "December",
+	}
+
+	doc.Find(rules.RootSelector).Each(func(i int, s *goquery.Selection) {
+		rootValues := make(map[string]interface{})
+		for key, field := range rules.Fields {
+			if field.Context == "root" {
+				sel := s
+				if field.Selector != "" {
+					sel = s.Find(field.Selector)
+				}
+				var val string
+				if field.Type == "attr" {
+					val, _ = sel.Attr(field.Attr)
+				} else if field.Type == "html" {
+					val, _ = sel.Html()
+				} else {
+					val = strings.TrimSpace(sel.Text())
+				}
+				rootValues[key] = val
+			}
+		}
+
+		processRow := func(rowSel *goquery.Selection) {
+			row := make(map[string]interface{})
+			for k, v := range rootValues {
+				row[k] = v
+			}
+			for key, field := range rules.Fields {
+				if field.Context != "root" {
+					sel := s
+					if rowSel != nil {
+						sel = rowSel
+					}
+					if field.Selector != "" {
+						sel = sel.Find(field.Selector)
+					}
+					var val string
+					if field.Type == "attr" {
+						val, _ = sel.Attr(field.Attr)
+					} else if field.Type == "html" {
+						val, _ = sel.Html()
+					} else {
+						val = strings.TrimSpace(sel.Text())
+					}
+					row[key] = val
+				}
+			}
+			
+			// Process Computed Fields
+			for _, comp := range rules.ComputedFields {
+				if comp.Type == "date_id_combine" {
+					dayRaw, _ := row[comp.DayKey].(string)
+					monthRaw, _ := row[comp.MonthKey].(string)
+					
+					day := strings.TrimSpace(dayRaw)
+					monthYear := strings.ToLower(strings.TrimSpace(monthRaw))
+					
+					// Regex: Extract month name and year (alphabets followed by 4 digits)
+					re := regexp.MustCompile(`([a-z]+)\s*(\d{4})`)
+					matches := re.FindStringSubmatch(monthYear)
+					
+					if len(matches) == 3 {
+						mName := matches[1]
+						year := matches[2]
+						
+						if enName, ok := idMonths[mName]; ok {
+							// Parse
+							dateStr := fmt.Sprintf("%s %s %s", day, enName, year)
+							t, err := time.Parse("2 January 2006", dateStr) // Correct layout for "1 January 2025" (no leading zero on day 2->1)
+							if err == nil {
+								row[comp.TargetKey] = t.Format("2006-01-02")
+							} else {
+								row[comp.TargetKey] = fmt.Sprintf("err_parse: %s", dateStr)
+							}
+						} else {
+							row[comp.TargetKey] = "err_month_unknown"
+						}
+					} else {
+						// Fallback: maybe year is separated? 
+						// For now, simple regex.
+						row[comp.TargetKey] = "err_fmt"
+					}
+				}
+			}
+
+			results = append(results, row)
+		}
+
+		if rules.RowSelector == "" {
+			processRow(nil)
+		} else {
+			s.Find(rules.RowSelector).Each(func(j int, rowSel *goquery.Selection) {
+				processRow(rowSel)
+			})
+		}
+	})
+
+	return results, nil
+}
