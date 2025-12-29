@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"text/template"
+	"time"
 
+	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
 )
 
@@ -87,8 +91,10 @@ func handleAI(ctx *WorkflowContext) error {
 
 	// Default user_id from context if not provided
 	if userID == "" {
-		if uid, ok := ctx.FiberCtx.Locals("userid").(int); ok {
-			userID = fmt.Sprintf("%d", uid)
+		if ctx.FiberCtx != nil {
+			if uid, ok := ctx.FiberCtx.Locals("userid").(int); ok {
+				userID = fmt.Sprintf("%d", uid)
+			}
 		}
 	}
 
@@ -105,11 +111,139 @@ func handleAI(ctx *WorkflowContext) error {
 	wm := WorkflowEngine{
 		ResultNode: result,
 	}
-	wfEngine, _ := ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine)
-	wfEngine = append(wfEngine, wm)
-	ctx.FiberCtx.Locals("wfEngine", wfEngine)
+	
+	if ctx.FiberCtx != nil {
+		wfEngine, _ := ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine)
+		wfEngine = append(wfEngine, wm)
+		ctx.FiberCtx.Locals("wfEngine", wfEngine)
+	} else {
+		// For non-HTTP contexts (e.g., WhatsApp), store in Extras
+		wfEngine, _ := ctx.Extras["wfEngine"].([]WorkflowEngine)
+		wfEngine = append(wfEngine, wm)
+		ctx.Extras["wfEngine"] = wfEngine
+	}
 
 	return nil
+}
+
+// ExecuteAIResult executes the workflow or SQL from an AI result
+// Can be called from both HTTP (Fiber) and non-HTTP (WhatsApp) contexts
+func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *WorkflowContext) error {
+	exec, _ := aiResult["execute"].(string)
+	if exec != "true" {
+		return nil // Nothing to execute
+	}
+	
+	metaAction, _ := aiResult["meta_action"].(string)
+	
+	// SQL Execution
+	if metaAction == "insert" || metaAction == "update" || metaAction == "delete" {
+		query, _ := aiResult["query"].(string)
+		paramsStr, _ := aiResult["parameters"].(string)
+		
+		var params []interface{}
+		if paramsStr != "" && paramsStr != "[]" {
+			json.Unmarshal([]byte(paramsStr), &params)
+		}
+		
+		if err := db.Exec(query, params...).Error; err != nil {
+			return err
+		}
+		
+		// Store success in context
+		if ctx != nil {
+			ctx.Extras["sql_executed"] = true
+		}
+		return nil
+	}
+	
+	// Check if AI returned a workflow name to execute
+	if workflowName, ok := aiResult["workflow_name"].(string); ok && workflowName != "" {
+		fmt.Printf("[ExecuteAIResult] Executing workflow: %s\n", workflowName)
+		
+		// For WhatsApp context, we need to create a mock Fiber context
+		// or execute the workflow differently
+		if ctx.FiberCtx == nil {
+			// WhatsApp context - execute workflow components manually
+			// This is complex, so for now we'll fall back to single component execution
+			fmt.Printf("[ExecuteAIResult] WhatsApp workflow execution not yet fully implemented\n")
+			// Fall through to single component execution
+		} else {
+			// HTTP context - use ExecuteFlow
+			params := make(map[string]interface{})
+			for key, value := range aiResult {
+				if key != "message" && key != "execute" && key != "meta_action" && 
+				   key != "conversation_state" && key != "user_id" && key != "query" && 
+				   key != "parameters" && key != "workflow_name" {
+					params[key] = value
+				}
+			}
+			return ExecuteFlow(ctx.FiberCtx, db, workflowName, false, params)
+		}
+	}
+	
+	// Workflow Execution - try to map to known workflows first
+	if ctx == nil {
+		return fmt.Errorf("workflow execution requires context")
+	}
+	
+	// Check if we can map this to a known workflow based on patterns
+	// This allows AI component execution to use full workflows
+	if action, ok := aiResult["action"].(string); ok {
+		if action == "extract_one_data" || action == "extract_data" {
+			// Check URL to determine which workflow
+			if url, ok := aiResult["url"].(string); ok {
+				workflowName := ""
+				if strings.Contains(url, "bi.go.id") && strings.Contains(url, "kurs") {
+					workflowName = "kurs bi"
+				}
+				// Add more URL patterns here as needed
+				
+				if workflowName != "" {
+					fmt.Printf("[ExecuteAIResult] Mapped scraping request to workflow: %s\n", workflowName)
+					// Try to execute the full workflow
+					// For WhatsApp, we need to manually execute workflow components
+					// since we don't have a Fiber context
+					// For now, fall through to single component execution
+					// TODO: Implement full workflow execution for WhatsApp
+				}
+			}
+		}
+	}
+	
+	// Build params for workflow component (skip metadata)
+	ctx.Params = []WorkflowDetailResult{}
+	for key, value := range aiResult {
+		if key != "message" && key != "execute" && key != "meta_action" && 
+		   key != "conversation_state" && key != "user_id" && key != "query" && key != "parameters" {
+			ctx.Params = append(ctx.Params, WorkflowDetailResult{
+				InputName: key,
+				CompValue: fmt.Sprintf("%v", value),
+			})
+		}
+	}
+	
+	// Determine component name
+	componentName := ""
+	if action, ok := aiResult["action"].(string); ok {
+		componentName = action
+		// Map known actions
+		if action == "extract_one_data" || action == "extract_data" {
+			componentName = "Web Scraper"
+		}
+	}
+	
+	if componentName == "" {
+		return fmt.Errorf("no component name in AI result")
+	}
+	
+	// Execute component
+	handler, ok := GetComponent(componentName)
+	if !ok {
+		return fmt.Errorf("component '%s' not found", componentName)
+	}
+	
+	return handler.Execute(ctx)
 }
 
 func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[string]interface{}, error) {
@@ -142,27 +276,74 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 			helpMsg.WriteString(fmt.Sprintf("• %s - %s\n", entity.Triggers, entity.Description))
 		}
 		helpMsg.WriteString("• help - Show this help\n")
-		helpMsg.WriteString("• get data [table] - Show data from a table (e.g., 'get data customer')")
+		helpMsg.WriteString("• get data [table] - Show data from a table (e.g., 'get data customer')\n")
 
 		return map[string]interface{}{
 			"message": helpMsg.String(),
 		}, nil
 	}
 
+	// WA Registration Command
+	if strings.HasPrefix(lowerCmd, "register wa api") {
+		qr, err := GetLoginQR()
+		if err != nil {
+			return map[string]interface{}{
+				"message": fmt.Sprintf("Error initializing WhatsApp: %v", err),
+			}, nil
+		}
+		if qr == "Already logged in" {
+			return map[string]interface{}{
+				"message": "✅ WhatsApp is already connected!",
+			}, nil
+		}
+		return map[string]interface{}{
+			"message": fmt.Sprintf("Please scan this QR Code to connect:\n\n%s", qr),
+			"qr":      qr, // Client can render this if needed
+		}, nil
+	}
+
 	// Check for "get/show/list [table]" command (Data Retrieval)
 	if (state.EntityType == "") && db != nil {
-		if strings.HasPrefix(lowerCmd, "get data ") || strings.HasPrefix(lowerCmd, "show data ") || strings.HasPrefix(lowerCmd, "list data ") {
+		if strings.HasPrefix(lowerCmd, "get data ") || strings.HasPrefix(lowerCmd, "ambil data ") || strings.HasPrefix(lowerCmd, "show data ") || strings.HasPrefix(lowerCmd, "list data ") {
 			parts := strings.Fields(lowerCmd)
 			if len(parts) >= 3 {
 				tableName := parts[2]
 				result, err := handleGetData(db, tableName)
 				if err != nil {
-					return map[string]interface{}{"error": err.Error()}, nil // Return error as map to be nice?
+					return map[string]interface{}{"error": err.Error()}, nil
 				}
 				
 				response := map[string]interface{}{"result": result}
-				if list, ok := result.([]map[string]interface{}); ok {
-					response["message"] = formatDataAsTable(list)
+				
+				// Check if this is a WhatsApp request (userID will be set for WA)
+				// For WhatsApp, generate and send Excel file
+				fmt.Printf("[AI Debug] userID: '%s', checking for Excel generation\n", userID)
+				if userID != "" && userID != "0" {
+					if list, ok := result.([]map[string]interface{}); ok && len(list) > 0 {
+						fmt.Printf("[AI Debug] Generating Excel for %d rows\n", len(list))
+						// Generate Excel file
+						filePath, err := generateExcelFromData(tableName, list)
+						if err == nil {
+							fmt.Printf("[AI Debug] Excel generated: %s\n", filePath)
+							// Send via WhatsApp
+							// We need the phone number - it should be passed in context
+							// For now, store file path in response for WhatsApp handler to send
+							response["excel_file"] = filePath
+							response["message"] = fmt.Sprintf("📊 Data from '%s' table (%d rows)\nSending as Excel file...", tableName, len(list))
+						} else {
+							fmt.Printf("[AI Debug] Excel generation failed: %v\n", err)
+							// Fallback to text if Excel generation fails
+							response["message"] = formatDataAsTable(list)
+						}
+					} else {
+						response["message"] = fmt.Sprintf("No data found in table '%s'", tableName)
+					}
+				} else {
+					fmt.Printf("[AI Debug] Not WhatsApp context (userID='%s'), using text format\n", userID)
+					// Web interface - use text format
+					if list, ok := result.([]map[string]interface{}); ok {
+						response["message"] = formatDataAsTable(list)
+					}
 				}
 				
 				return response, nil
@@ -746,4 +927,63 @@ func formatDataAsTable(data []map[string]interface{}) string {
 		b.WriteString("|\n")
 	}
 	return b.String()
+}
+
+// generateExcelFromData creates an Excel file from query results
+func generateExcelFromData(tableName string, data []map[string]interface{}) (string, error) {
+	// Import excelize at the top of file if not already imported
+	excel := excelize.NewFile()
+	defer excel.Close()
+	
+	sheetName := "Sheet1"
+	excel.SetSheetName(sheetName, tableName)
+	
+	if len(data) == 0 {
+		return "", fmt.Errorf("no data to export")
+	}
+	
+	// Get headers from first row
+	var headers []string
+	headerMap := make(map[string]bool)
+	for _, row := range data {
+		for key := range row {
+			if !headerMap[key] {
+				headers = append(headers, key)
+				headerMap[key] = true
+			}
+		}
+	}
+	sort.Strings(headers)
+	
+	// Write headers
+	for i, header := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		excel.SetCellValue(tableName, cell, header)
+	}
+	
+	// Write data rows
+	for rowIdx, row := range data {
+		for colIdx, header := range headers {
+			cell, _ := excelize.CoordinatesToCellName(colIdx+1, rowIdx+2)
+			value := row[header]
+			excel.SetCellValue(tableName, cell, value)
+		}
+	}
+	
+	// Auto-fit columns
+	for i := range headers {
+		col, _ := excelize.ColumnNumberToName(i + 1)
+		excel.SetColWidth(tableName, col, col, 15)
+	}
+	
+	// Save to temp file
+	timestamp := time.Now().Format("20060102_150405")
+	fileName := fmt.Sprintf("%s_%s.xlsx", tableName, timestamp)
+	filePath := filepath.Join(os.TempDir(), fileName)
+	
+	if err := excel.SaveAs(filePath); err != nil {
+		return "", fmt.Errorf("failed to save Excel file: %v", err)
+	}
+	
+	return filePath, nil
 }

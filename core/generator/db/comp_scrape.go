@@ -313,9 +313,15 @@ func handleScrape(ctx *WorkflowContext) error {
 	wm := WorkflowEngine{
 		ResultNode: finalResult,
 	}
-	wfEngine, _ := ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine)
-	wfEngine = append(wfEngine, wm)
-	ctx.FiberCtx.Locals("wfEngine", wfEngine)
+	
+	if ctx.FiberCtx != nil {
+		wfEngine, _ := ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine)
+		wfEngine = append(wfEngine, wm)
+		ctx.FiberCtx.Locals("wfEngine", wfEngine)
+	} else {
+		// For non-HTTP contexts (e.g., WhatsApp), store in Extras
+		ctx.Extras["result"] = finalResult
+	}
 
 	fmt.Printf("[Scraper] Action %s completed successfully.\n", action)
 	return nil

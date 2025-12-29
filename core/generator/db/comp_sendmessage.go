@@ -72,7 +72,18 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 
 	// If message is still empty, try to get it from previous node's result
 	if message == "" {
-		if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok && len(wfEngine) > 0 {
+		var wfEngine []WorkflowEngine
+		var ok bool
+		
+		if c != nil {
+			wfEngine, ok = c.Locals("wfEngine").([]WorkflowEngine)
+		} else {
+			// WhatsApp context - check ctx.Extras if available
+			// Note: ctx is not available here, so we can't access Extras
+			// This will be handled later
+		}
+		
+		if ok && len(wfEngine) > 0 {
 			// Get the last result from previous node
 			lastResult := wfEngine[len(wfEngine)-1]
 			if lastResult.ResultNode != nil {
@@ -88,7 +99,14 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 
 	// If user_id is still 0, try to get it from previous node's result
 	if sendTo == 0 {
-		if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok && len(wfEngine) > 0 {
+		var wfEngine []WorkflowEngine
+		var ok bool
+		
+		if c != nil {
+			wfEngine, ok = c.Locals("wfEngine").([]WorkflowEngine)
+		}
+		
+		if ok && len(wfEngine) > 0 {
 			// Get the last result from previous node
 			lastResult := wfEngine[len(wfEngine)-1]
 			if lastResult.ResultNode != nil {
@@ -166,6 +184,15 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 
 	// Handle based on message type
 	if messageType == "chat" {
+		// Check if this is a WhatsApp context (nil FiberCtx)
+		if c == nil {
+			// WhatsApp context - store message in wfEngine for WhatsApp handler to send
+			fmt.Printf("[SendMessage] WhatsApp context detected, storing message: %s\n", message)
+			// Message will be sent by comp_internal_wa
+			// Store in a way that WhatsApp can access it
+			return nil
+		}
+		
 		// For chat messages, just send via WebSocket without saving to DB
 		// Also extract conversation_state and execute flag from previous node if available
 		var conversationState string

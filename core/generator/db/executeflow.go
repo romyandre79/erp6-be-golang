@@ -833,6 +833,11 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool, params
 // Example: If AI node outputs {"action": "scrape", "url": "example.com"},
 // subsequent nodes can use $action and $url to access these values.
 func ResolveParam(c *fiber.Ctx, val string) string {
+	// If no HTTP context (e.g., WhatsApp), return value as-is
+	if c == nil {
+		return val
+	}
+	
 	// Handle embedded variables like: https://example.com?q=$city_name
 	// Supports recursive resolution (up to 5 levels)
 	if strings.Contains(val, "$") {

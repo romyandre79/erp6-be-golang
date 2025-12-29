@@ -14,23 +14,24 @@ func init() {
 // handleTransform transforms data from previous node
 // Supports: array_to_first, format_message, format_array
 func handleTransform(ctx *WorkflowContext) error {
-	// Get previous node result
-	wfEngine, ok := ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine)
+	// Get previous node result from wfEngine
+	var wfEngine []WorkflowEngine
+	var ok bool
+	
+	if ctx.FiberCtx != nil {
+		wfEngine, ok = ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine)
+	} else {
+		// WhatsApp context - use Extras
+		wfEngine, ok = ctx.Extras["wfEngine"].([]WorkflowEngine)
+	}
+	
 	if !ok || len(wfEngine) == 0 {
-		err := fmt.Errorf("no previous node result found")
-		appendStepResult(ctx.FiberCtx, 0, 0, "Transform", nil, map[string]interface{}{
-			"error": err.Error(),
-		}, false, 0, "")
-		return err
+		return fmt.Errorf("no previous node result found")
 	}
 
 	lastResult := wfEngine[len(wfEngine)-1]
 	if lastResult.ResultNode == nil {
-		err := fmt.Errorf("previous node has no result")
-		appendStepResult(ctx.FiberCtx, 0, 0, "Transform", nil, map[string]interface{}{
-			"error": err.Error(),
-		}, false, 0, "")
-		return err
+		return fmt.Errorf("previous node has no result")
 	}
 
 	// Get parameters first to check transform type
@@ -208,15 +209,24 @@ func handleTransform(ctx *WorkflowContext) error {
 	}
 
 	fmt.Printf("[Transform] Output result: %+v\n", result)
-	appendStepResult(ctx.FiberCtx, 0, 0, "Transform", nil, result, true, 0, "")
-
+	
 	// Append result to workflow engine
 	wm := WorkflowEngine{
-		ResultNode: result,
+		ComponentName: "Transform",
+		ResultNode:    result,
 	}
-	wfEngine, _ = ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine)
-	wfEngine = append(wfEngine, wm)
-	ctx.FiberCtx.Locals("wfEngine", wfEngine)
+	
+	if ctx.FiberCtx != nil {
+		appendStepResult(ctx.FiberCtx, 0, 0, "Transform", nil, result, true, 0, "")
+		wfEngine, _ = ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine)
+		wfEngine = append(wfEngine, wm)
+		ctx.FiberCtx.Locals("wfEngine", wfEngine)
+	} else {
+		// WhatsApp context - use Extras
+		wfEngine, _ = ctx.Extras["wfEngine"].([]WorkflowEngine)
+		wfEngine = append(wfEngine, wm)
+		ctx.Extras["wfEngine"] = wfEngine
+	}
 
 	return nil
 }

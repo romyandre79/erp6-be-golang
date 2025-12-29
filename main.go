@@ -114,6 +114,16 @@ func main() {
 		helpers.IsError(err, "Database Migration", true)
 	}
 
+	// Initialize WA DB for AI
+	generator.SetWADatabase(db)
+	
+	// Start WA Client immediately
+	go func() {
+		if err := generator.InitWhatmeow(); err != nil {
+			log.Printf("Failed to init WhatsApp: %v", err)
+		}
+	}()
+
 	// Load Cache from .env
 	_, err = cache.NewCache()
 	if err != nil {
