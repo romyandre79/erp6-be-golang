@@ -546,6 +546,11 @@ func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.D
 				}
 			}
 
+			// Add formatted message for SendMessage component
+			if rows, ok := resultStat["data"].([]map[string]interface{}); ok {
+				resultStat["message"] = formatDataAsTable(rows)
+			}
+
 			wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})
 			c.Locals("wfEngine", wfEngine)
 			helpers.SuccessResponse(c, "DATA RETRIEVED", resultStat)

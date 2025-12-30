@@ -228,15 +228,17 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 			}
 		}
 		
-		// Modify message if workflow is executing
+		// Modify message if workflow is executing AND we don't have actual data yet
 		displayMessage := message
-		if executeFlag == "true" {
+		if executeFlag == "true" && (message == "" || message == "Data Customer sent" || strings.Contains(message, "processed successfully")) {
+			// Only show processing message if we don't have actual data
 			displayMessage = "⏳ Processing your request, please wait..."
 		}
 		
 		if ws.GlobalHub != nil {
 			payload, err := json.Marshal(map[string]interface{}{
 				"type":               "chat",
+				"senderid":           sendTo, // User who sent the message
 				"message":            displayMessage,
 				"title":              title,
 				"conversation_state": conversationState,

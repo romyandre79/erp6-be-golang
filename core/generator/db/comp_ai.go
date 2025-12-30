@@ -276,7 +276,6 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 			helpMsg.WriteString(fmt.Sprintf("• %s - %s\n", entity.Triggers, entity.Description))
 		}
 		helpMsg.WriteString("• help - Show this help\n")
-		helpMsg.WriteString("• get data [table] - Show data from a table (e.g., 'get data customer')\n")
 
 		return map[string]interface{}{
 			"message": helpMsg.String(),
@@ -302,54 +301,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 		}, nil
 	}
 
-	// Check for "get/show/list [table]" command (Data Retrieval)
-	if (state.EntityType == "") && db != nil {
-		if strings.HasPrefix(lowerCmd, "get data ") || strings.HasPrefix(lowerCmd, "ambil data ") || strings.HasPrefix(lowerCmd, "show data ") || strings.HasPrefix(lowerCmd, "list data ") {
-			parts := strings.Fields(lowerCmd)
-			if len(parts) >= 3 {
-				tableName := parts[2]
-				result, err := handleGetData(db, tableName)
-				if err != nil {
-					return map[string]interface{}{"error": err.Error()}, nil
-				}
-				
-				response := map[string]interface{}{"result": result}
-				
-				// Check if this is a WhatsApp request (userID will be set for WA)
-				// For WhatsApp, generate and send Excel file
-				fmt.Printf("[AI Debug] userID: '%s', checking for Excel generation\n", userID)
-				if userID != "" && userID != "0" {
-					if list, ok := result.([]map[string]interface{}); ok && len(list) > 0 {
-						fmt.Printf("[AI Debug] Generating Excel for %d rows\n", len(list))
-						// Generate Excel file
-						filePath, err := generateExcelFromData(tableName, list)
-						if err == nil {
-							fmt.Printf("[AI Debug] Excel generated: %s\n", filePath)
-							// Send via WhatsApp
-							// We need the phone number - it should be passed in context
-							// For now, store file path in response for WhatsApp handler to send
-							response["excel_file"] = filePath
-							response["message"] = fmt.Sprintf("📊 Data from '%s' table (%d rows)\nSending as Excel file...", tableName, len(list))
-						} else {
-							fmt.Printf("[AI Debug] Excel generation failed: %v\n", err)
-							// Fallback to text if Excel generation fails
-							response["message"] = formatDataAsTable(list)
-						}
-					} else {
-						response["message"] = fmt.Sprintf("No data found in table '%s'", tableName)
-					}
-				} else {
-					fmt.Printf("[AI Debug] Not WhatsApp context (userID='%s'), using text format\n", userID)
-					// Web interface - use text format
-					if list, ok := result.([]map[string]interface{}); ok {
-						response["message"] = formatDataAsTable(list)
-					}
-				}
-				
-				return response, nil
-			}
-		}
-	}
+
 	// Continue existing conversation
 	if state.EntityType != "" {
 		return runConversationStep(command, state, dbDriver, userID, "", "", db)
@@ -361,7 +313,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 	initialArg := ""
 	isListCommand := false
 
-	if strings.HasPrefix(lowerCmd, "list ") {
+	/*if strings.HasPrefix(lowerCmd, "list ") {
 		for _, entity := range availableEntities {
 			if strings.HasPrefix(lowerCmd, "list "+entity.Name) || strings.HasPrefix(lowerCmd, "list "+entity.Name+"s") {
 				matchedEntity = entity.Name
@@ -369,7 +321,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 				break
 			}
 		}
-	} else {
+	} else {*/
 		// Create command
 		for _, entity := range availableEntities {
 			if entity.Name == "run" && (strings.HasPrefix(lowerCmd, "run ") || lowerCmd == "run") {
@@ -404,7 +356,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 				break
 			}
 		}
-	}
+	//}
 
 	if matchedEntity != "" {
 		if isListCommand {
@@ -434,7 +386,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 	// Unknown
 	return map[string]interface{}{
 		"execute": "false",
-		"message": "I didn't understand that command. Try 'create menu', 'list menus', 'get data [table]' or 'help'.",
+		"message": "I didn't understand that command. Try 'help'.",
 		"user_id": userID,
 	}, nil
 }
@@ -747,45 +699,20 @@ func generateQueryFromData(entityType string, data map[string]string, dbDriver, 
 		}
 	}
 
-	// Helper for specific hardcoded things (restore if needed, or rely on flexible JSONs)
-	if data["menuname"] != "" &&FuncMapHas(data, "menuname_slug") == false {
-		data["menuname_slug"] = strings.ToLower(strings.ReplaceAll(data["menuname"], " ", "_"))
-	}
-	
-	if entityType == "table" && data["columns"] != "" {
-		processTableColumns(data, dbDriver)
-	}
-
-	queryTmpl, ok := flow.Queries[dbDriver]
-	if !ok {
-		if val, ok := flow.Queries["mysql"]; ok {
-			queryTmpl = val
-		} else if val, ok := flow.Queries["default"]; ok {
-			queryTmpl = val
-		} else {
-			return "", "", "", "", fmt.Errorf("no query template for driver: %s", dbDriver)
-		}
-	}
-
-	query := processTemplate(queryTmpl, data)
-
-	var params []interface{}
-	for _, paramName := range flow.Params {
-		params = append(params, data[paramName])
-	}
-	jsonParams, _ := json.Marshal(params)
-
+	// Format success message
 	successMsg := processTemplate(flow.SuccessMessage, data)
 	if successMsg == "" {
-		successMsg = fmt.Sprintf("%s created successfully!", strings.Title(entityType))
+		successMsg = fmt.Sprintf("%s processed successfully!", strings.Title(entityType))
 	}
-
+	
 	metaAction := flow.MetaAction
 	if metaAction == "" {
-		metaAction = "insert"
+		metaAction = "workflow"
 	}
-
-	return query, string(jsonParams), successMsg, metaAction, nil
+	
+	// For workflow-routing commands: return empty query with meta_action
+	// The Decision component will use meta_action to route to the correct workflow
+	return "", "[]", successMsg, metaAction, nil
 }
 
 func processTemplate(tmpl string, data map[string]string) string {
@@ -826,64 +753,6 @@ func generateListQuery(entityType, dbDriver string, db *gorm.DB) (map[string]int
 	}, nil
 }
 
-func processTableColumns(data map[string]string, driver string) {
-	columnsStr := data["columns"]
-	primaryKey := data["primarykey"]
-	columnDefs := []string{}
-	columnParts := strings.Split(columnsStr, ",")
-
-	for i, col := range columnParts {
-		col = strings.TrimSpace(col)
-		parts := strings.Split(col, ":")
-		if len(parts) != 2 {
-			continue
-		}
-		colName := strings.TrimSpace(parts[0])
-		colType := strings.TrimSpace(parts[1])
-
-		if primaryKey == "" && i == 0 {
-			if strings.Contains(driver, "mysql") || strings.Contains(driver, "mariadb") {
-				columnDefs = append(columnDefs, fmt.Sprintf("%s %s PRIMARY KEY AUTO_INCREMENT", colName, colType))
-			} else if strings.Contains(driver, "postgres") {
-				columnDefs = append(columnDefs, fmt.Sprintf("%s SERIAL PRIMARY KEY", colName))
-			} else if strings.Contains(driver, "sqlite") {
-				columnDefs = append(columnDefs, fmt.Sprintf("%s %s PRIMARY KEY AUTOINCREMENT", colName, colType))
-			} else {
-				columnDefs = append(columnDefs, fmt.Sprintf("%s %s PRIMARY KEY", colName, colType))
-			}
-		} else {
-			columnDefs = append(columnDefs, fmt.Sprintf("%s %s", colName, colType))
-		}
-	}
-	data["column_defs"] = strings.Join(columnDefs, ", ")
-}
-
-func handleGetData(db *gorm.DB, tableName string) (interface{}, error) {
-	var results []map[string]interface{}
-	// Safety check: tableName should only contain alphanumeric/underscore to prevent injection
-	// Or use GORM safely? GORM raw with table name param doesn't always work for FROM clause
-	// But for simple "get data", maybe we just trust input if internally authenticated?
-	// Let's do basic sanitization
-	cleanTable := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
-			return r
-		}
-		return -1
-	}, tableName)
-	
-	if cleanTable == "" { return nil, fmt.Errorf("invalid table name") }
-
-	// Limit to 50 for safety
-	if err := db.Table(cleanTable).Limit(50).Find(&results).Error; err != nil {
-		return nil, err
-	}
-	return results, nil
-}
-
-func FuncMapHas(m map[string]string, key string) bool {
-    _, ok := m[key]
-    return ok
-}
 
 func formatDataAsTable(data []map[string]interface{}) string {
 	if len(data) == 0 {
