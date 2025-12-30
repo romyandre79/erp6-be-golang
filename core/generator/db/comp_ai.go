@@ -233,6 +233,43 @@ func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *Workflow
 		}
 	}
 	
+	// Check if this is a workflow-routing command (has meta_action but no action)
+	if componentName == "" {
+		if metaAction, ok := aiResult["meta_action"].(string); ok && metaAction != "" {
+			// This is a workflow-routing command (e.g., "Data Customer")
+			// For web: workflow executed by Decision component
+			// For WhatsApp: execute the component directly here
+			fmt.Printf("[ExecuteAIResult] Workflow-routing command detected: meta_action=%s\n", metaAction)
+			
+			// Check if this is WhatsApp context (no FiberCtx)
+			if ctx.FiberCtx == nil {
+				fmt.Printf("[ExecuteAIResult] WhatsApp context - executing component directly\n")
+				
+				// For WhatsApp, execute the Search component directly
+				// Map meta_action to component and parameters
+				switch metaAction {
+				case "data_customer":
+					// Execute Search component with customer table
+					// Query directly and format
+					var customerData []map[string]interface{}
+					if err := db.Table("customer").Find(&customerData).Error; err != nil {
+						return fmt.Errorf("failed to get customer data: %v", err)
+					}
+					
+					// Format as table and store in aiResult for WhatsApp handler to use
+					formattedMsg := formatDataAsTable(customerData)
+					aiResult["message"] = formattedMsg
+					fmt.Printf("[ExecuteAIResult] Formatted message for WhatsApp: %s\n", formattedMsg)
+					
+				default:
+					return fmt.Errorf("no WhatsApp handler for meta_action: %s", metaAction)
+				}
+			}
+			
+			return nil
+		}
+	}
+	
 	if componentName == "" {
 		return fmt.Errorf("no component name in AI result")
 	}
@@ -415,6 +452,35 @@ func runConversationStep(command string, state AIConversationState, dbDriver, us
 	flow, err := getQuestionFlow(db, state.EntityType)
 	if err != nil {
 		return nil, err
+	}
+
+	// If no questions, execute immediately
+	if len(flow.Questions) == 0 {
+		query, params, reply, metaAction, err := generateQueryFromData(state.EntityType, state.CollectedData, dbDriver, userID, db)
+		if err != nil {
+			return nil, err
+		}
+
+		result := map[string]interface{}{
+			"execute":            "true",
+			"query":              query,
+			"parameters":         params,
+			"meta_action":        metaAction,
+			"message":            reply,
+			"completed":          true,
+			"conversation_state": "{}",
+			"user_id":            userID,
+		}
+		// Unmarshal query if JSON
+		if strings.HasPrefix(strings.TrimSpace(query), "{") {
+			var queryMap map[string]interface{}
+			if err := json.Unmarshal([]byte(query), &queryMap); err == nil {
+				for k, v := range queryMap {
+					result[k] = v
+				}
+			}
+		}
+		return result, nil
 	}
 
 	// Handle Initial Arg for first Q

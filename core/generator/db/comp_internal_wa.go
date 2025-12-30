@@ -8,7 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
 	"github.com/mdp/qrterminal/v3"
+	"github.com/valyala/fasthttp"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -256,28 +258,45 @@ func eventHandler(evt interface{}) {
 			
 			msg, _ := result["message"].(string)
 
-			// Handle execution via comp_ai's ExecuteAIResult
+			// Handle execution via full workflow (same as web)
 			if exec, ok := result["execute"].(string); ok && exec == "true" {
-				fmt.Printf("[WA Debug] Executing via ExecuteAIResult\n")
+				fmt.Printf("[WA Debug] Executing aicommand workflow\n")
 				
-				// Create WorkflowContext
-				wfCtx := &WorkflowContext{
-					FiberCtx: nil,
-					DB:       waDB,
-					Params:   []WorkflowDetailResult{},
-					Extras:   make(map[string]interface{}),
+				// Create a proper fasthttp request context
+				var reqCtx fasthttp.RequestCtx
+				reqCtx.Request.Header.SetMethod("POST")
+				reqCtx.Request.SetRequestURI("/whatsapp/aicommand")
+				
+				// Create Fiber app and acquire context
+				app := fiber.New()
+				c := app.AcquireCtx(&reqCtx)
+				defer app.ReleaseCtx(c)
+				
+				// Set up context locals (authorization)
+				c.Locals("userid", user.Useraccessid)
+				c.Locals("username", user.Username)
+				c.Locals("db", waDB)
+				c.Locals("wfEngine", []WorkflowEngine{})
+				
+				// Get conversation state
+				stateJSON := getWAUserState(senderPhone)
+				
+				// Prepare workflow parameters
+				params := map[string]interface{}{
+					"command":            text,
+					"conversation_state": stateJSON,
+					"user_id":           fmt.Sprintf("%d", user.Useraccessid),
 				}
 				
-				// Initialize wfEngine in Extras
-				wfCtx.Extras["wfEngine"] = []WorkflowEngine{}
+				fmt.Printf("[WA Debug] Executing workflow with params: %+v\n", params)
 				
-				// Call ExecuteAIResult from comp_ai
-				if err := ExecuteAIResult(result, waDB, wfCtx); err != nil {
-					fmt.Printf("[WA Debug] Execution error: %v\n", err)
+				// Execute the aicommand workflow
+				if err := ExecuteFlow(c, waDB, "aicommand", false, params); err != nil {
+					fmt.Printf("[WA Debug] Workflow execution error: %v\n", err)
 					msg = fmt.Sprintf("❌ Execution Failed: %v", err)
 				} else {
 					// Debug: Print all wfEngine nodes
-					if wfEngine, ok := wfCtx.Extras["wfEngine"].([]WorkflowEngine); ok {
+					if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
 						fmt.Printf("[WA Debug] wfEngine has %d nodes:\n", len(wfEngine))
 						for i, node := range wfEngine {
 							fmt.Printf("[WA Debug] Node %d: %s\n", i, node.ComponentName)
@@ -288,20 +307,17 @@ func eventHandler(evt interface{}) {
 					
 					// Check if SendMessage component was executed (for formatted output)
 					foundSendMessage := false
-					if wfEngine, ok := wfCtx.Extras["wfEngine"].([]WorkflowEngine); ok {
+					if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
 						for _, node := range wfEngine {
 							if node.ComponentName == "sendmessage" || node.ComponentName == "SendMessage" {
 								foundSendMessage = true
 								fmt.Printf("[WA Debug] Found SendMessage node\n")
-								// Extract the message from SendMessage's input params
-								if inputParams, ok := node.DataInputNode.(map[string]string); ok {
-									fmt.Printf("[WA Debug] SendMessage input params: %+v\n", inputParams)
-									if sendMsg, ok := inputParams["message"]; ok && sendMsg != "" {
+								// Extract the message from SendMessage's result (not input params)
+								if resMap, ok := node.ResultNode.(map[string]interface{}); ok {
+									fmt.Printf("[WA Debug] SendMessage result: %+v\n", resMap)
+									if sendMsg, ok := resMap["message"].(string); ok && sendMsg != "" {
 										msg = sendMsg
-										fmt.Printf("[WA Debug] Using formatted message from SendMessage: %s\n", sendMsg)
-									} else if sendMsg, ok := inputParams["messagenotif"]; ok && sendMsg != "" {
-										msg = sendMsg
-										fmt.Printf("[WA Debug] Using formatted message from SendMessage (messagenotif): %s\n", sendMsg)
+										fmt.Printf("[WA Debug] Using formatted message from SendMessage result: %s\n", sendMsg)
 									}
 								}
 								break
@@ -310,11 +326,28 @@ func eventHandler(evt interface{}) {
 					}
 					
 					if !foundSendMessage {
-						// No SendMessage, show raw result
-						msg += "\n\n✅ Command Executed Successfully."
-						if execResult, ok := wfCtx.Extras["result"]; ok {
-							msg += "\n\n📊 Result:\n"
-							msg += formatResult(execResult)
+						// No SendMessage component found, check wfEngine for message
+						fmt.Printf("[WA Debug] SendMessage component not found, checking wfEngine for message\n")
+						if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
+							// Look for the last node with a "message" field
+							for i := len(wfEngine) - 1; i >= 0; i-- {
+								node := wfEngine[i]
+								if resMap, ok := node.ResultNode.(map[string]interface{}); ok {
+									if formattedMsg, ok := resMap["message"].(string); ok && formattedMsg != "" {
+										// Check if it's not just a generic success message
+										if formattedMsg != msg && !strings.Contains(formattedMsg, "processed successfully") {
+											msg = formattedMsg
+											fmt.Printf("[WA Debug] Using formatted message from wfEngine: %s\n", formattedMsg)
+											break
+										}
+									}
+								}
+							}
+						}
+						
+						// If still no formatted message, show generic success
+						if msg == "" || msg == "Data Customer sent" {
+							msg = "✅ Command Executed Successfully"
 						}
 					}
 				}
