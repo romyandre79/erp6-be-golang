@@ -24,6 +24,8 @@ func init() {
 }
 
 func handleScrape(ctx *WorkflowContext) error {
+	fmt.Printf("[Scraper DEBUG] handleScrape called. FiberCtx is nil? %v. Extras available? %v\n", ctx.FiberCtx == nil, ctx.Extras != nil)
+
 	var (
 		url             string
 		method          string
@@ -309,6 +311,73 @@ func handleScrape(ctx *WorkflowContext) error {
 		finalResult["result"] = result
 	}
 
+	// Format result as message for Telegram/WhatsApp
+	// Try to detect if it is tabular data (list of keys with same length arrays)
+	// or just key-value
+	var messageBuilder strings.Builder
+	
+	if resultMap, ok := result.(map[string]interface{}); ok {
+		// Check if it's "extract_data" format: map[string][]string
+		isTabular := true
+		var length int = -1
+		var keys []string
+		
+		for k, v := range resultMap {
+			keys = append(keys, k)
+			if arr, ok := v.([]string); ok {
+				if length == -1 {
+					length = len(arr)
+				} else if len(arr) != length {
+					isTabular = false
+				}
+			} else {
+				isTabular = false
+			}
+		}
+		
+		if isTabular && length > 0 {
+			// Convert to []map[string]interface{} for table formatter
+			var rows []map[string]interface{}
+			for i := 0; i < length; i++ {
+				row := make(map[string]interface{})
+				for _, k := range keys {
+					if arr, ok := resultMap[k].([]string); ok {
+						row[k] = arr[i]
+					}
+				}
+				rows = append(rows, row)
+			}
+			messageBuilder.WriteString(formatDataAsTable(rows))
+		} else {
+			// Key-Value list
+			messageBuilder.WriteString("📄 **Result:**\n")
+			for k, v := range resultMap {
+				if k == "html" || k == "url" { continue } // Skip large fields
+				valStr := fmt.Sprintf("%v", v)
+				if len(valStr) > 200 { valStr = valStr[:200] + "..." }
+				messageBuilder.WriteString(fmt.Sprintf("- **%s**: %s\n", k, valStr))
+			}
+		}
+	} else if resultArr, ok := result.([]interface{}); ok {
+		// List of objects (e.g. links)
+		messageBuilder.WriteString(fmt.Sprintf("Found %d items:\n", len(resultArr)))
+		// Convert to table if possible
+		var rows []map[string]interface{}
+		for _, item := range resultArr {
+			if m, ok := item.(map[string]interface{}); ok {
+				rows = append(rows, m)
+			}
+		}
+		if len(rows) > 0 {
+			messageBuilder.WriteString(formatDataAsTable(rows))
+		}
+	} else {
+		// Fallback
+		messageBuilder.WriteString(fmt.Sprintf("%v", result))
+	}
+	
+	finalResult["message"] = messageBuilder.String()
+
 	// Append result to workflow engine
 	wm := WorkflowEngine{
 		ResultNode: finalResult,
@@ -321,10 +390,19 @@ func handleScrape(ctx *WorkflowContext) error {
 	} else {
 		// For non-HTTP contexts (e.g., WhatsApp), store in Extras
 		ctx.Extras["result"] = finalResult
+		fmt.Printf("[Scraper DEBUG] Stored result in Extras (size=%d keys=%v)\n", len(finalResult), getKeys(finalResult))
 	}
 
 	fmt.Printf("[Scraper] Action %s completed successfully.\n", action)
 	return nil
+}
+
+func getKeys(m map[string]interface{}) []string {
+    keys := make([]string, 0, len(m))
+    for k := range m {
+        keys = append(keys, k)
+    }
+    return keys
 }
 
 // getHTMLFromResult extracts HTML string from browser scraping result

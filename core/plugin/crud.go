@@ -3,7 +3,6 @@ package plugin
 import (
 	"erp6-be-golang/core/events"
 	"erp6-be-golang/core/helpers"
-	"erp6-be-golang/core/i18n"
 	"errors"
 	"fmt"
 	"math"
@@ -283,7 +282,7 @@ func autoPreload(db *gorm.DB, modelType reflect.Type) *gorm.DB {
 
 func friendlySQLError(err error, lang string) string {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return i18n.Translate(lang, "DATA NOT_FOUND", nil)
+		return "DATA NOT_FOUND"
 	}
 
 	msg := err.Error()
@@ -294,9 +293,9 @@ func friendlySQLError(err error, lang string) string {
 		re := regexp.MustCompile("FOREIGN KEY \\(`(.*?)`\\)")
 		matches := re.FindStringSubmatch(msg)
 		if len(matches) > 1 {
-			return i18n.Translate(lang, "INVALID_FIELD_REQUIRED", map[string]interface{}{"field": matches[1]})
+			return "INVALID_FIELD_REQUIRED" + matches[1]
 		}
-		return i18n.Translate(lang, "INVALID_REFERENCE", nil)
+		return "INVALID_REFERENCE"
 	}
 
 	// Case 2: Duplicate entry
@@ -304,9 +303,9 @@ func friendlySQLError(err error, lang string) string {
 		re := regexp.MustCompile("Duplicate entry '(.*?)'")
 		matches := re.FindStringSubmatch(msg)
 		if len(matches) > 1 {
-			return i18n.Translate(lang, "INVALID DATA EXISTS", map[string]interface{}{"field": matches[1]})
+			return "INVALID DATA EXISTS" + matches[1]
 		}
-		return i18n.Translate(lang, "INVALID DATA DUPLICATE", nil)
+		return "INVALID DATA DUPLICATE"
 	}
 
 	// Case 3: Column cannot be null
@@ -314,9 +313,9 @@ func friendlySQLError(err error, lang string) string {
 		re := regexp.MustCompile("Column '(.*?)'")
 		matches := re.FindStringSubmatch(msg)
 		if len(matches) > 1 {
-			return i18n.Translate(lang, "INVALID_FIELD_REQUIRED", map[string]interface{}{"field": matches[1]})
+			return "INVALID_FIELD_REQUIRED" + matches[1]
 		}
-		return i18n.Translate(lang, "INVALID_REFERENCE", nil)
+		return "INVALID_REFERENCE"
 	}
 
 	// Default fallback

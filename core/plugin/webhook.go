@@ -33,6 +33,7 @@ type ComponentOutput struct {
 // Update usage
 func WebhookHandler(c *fiber.Ctx, db *gorm.DB) error {
 	source := c.Params("source")
+	fmt.Printf(" [Webhook Debug] Request received on /api/webhook/%s\n", source)
 	if source == "" {
 		return c.Status(http.StatusBadRequest).JSON(fiber.Map{"error": "Source is required"})
 	}

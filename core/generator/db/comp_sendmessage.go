@@ -188,9 +188,38 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 		if c == nil {
 			// WhatsApp context - store message in wfEngine for WhatsApp handler to send
 			fmt.Printf("[SendMessage] WhatsApp context detected, storing message: %s\n", message)
-			// Message will be sent by comp_internal_wa
-			// Store in a way that WhatsApp can access it
+			
+			// Try to send immediate message via callback if available
+			// This enables "Processing..." messages to be sent in real-time
+			// Note: access wfExtras via closure-captured context logic? 
+			// Wait, c is nil, so we can't access Locals.
+			// BUT, handleSendMessage doesn't have access to the WorkflowContext struct which holds Extras.
+			// We need to pass Extras to handleSendMessage or Locals.
+			// Since c is nil, we can't use it.
+			
+			// We must rely on the caller (ExecuteFlow) to have populated something we can use.
+			// Actually, ExecuteFlow DOES pass a valid *fiber.Ctx even for valid internal flows!
+			// In comp_internal_wa.go we did: c := app.AcquireCtx(&reqCtx)
+			// So c IS NOT NIL in comp_internal_wa.go!
+			
+			// The check 'if c == nil' in original code was likely for old logic or strictly internal calls without Fiber.
+			// But our new comp_internal_wa implementation USES Fiber Ctx.
+			// So execution will likely NOT hit this 'if c == nil' block if called from comp_internal_wa.
+			// It will proceed to normal logic.
+			
+			// Let's verify:
+			// If c != nil, we can access Locals("wfExtras").
 			return nil
+		}
+		
+		// Check for WhatsApp callback in Locals
+		if wfExtras, ok := c.Locals("wfExtras").(map[string]interface{}); ok {
+			if callback, ok := wfExtras["send_wa_callback"].(func(string)); ok {
+				fmt.Printf("[SendMessage] triggering WA callback for: %s\n", message)
+				callback(message)
+				// PREVENT WEB BROADCAST: Return early so it doesn't also show up on the web UI
+				return nil
+			}
 		}
 		
 		// For chat messages, just send via WebSocket without saving to DB
@@ -254,6 +283,69 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 			fmt.Println("Warning: GlobalHub is nil, cannot send WebSocket chat message")
 		}
 		fmt.Printf("[SendMessage] Success! Chat message sent to user %d\n", sendTo)
+		return nil
+	}
+
+	// Handle Telegram Message
+	// Check if we have source=telegram and chat_id in the workflow engine history
+	var tgChatID int64
+	var tgSource bool
+	
+	// Scan previous nodes for Telegram metadata
+	if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
+		for i := len(wfEngine) - 1; i >= 0; i-- {
+			if wfEngine[i].ResultNode != nil {
+				if resultMap, ok := wfEngine[i].ResultNode.(map[string]interface{}); ok {
+					// Check source
+					if s, ok := resultMap["source"].(string); ok && s == "telegram" {
+						tgSource = true
+					}
+					// Check chat_id (might be int, int64, or float64 from JSON)
+					if cid, ok := resultMap["chat_id"]; ok {
+						if v, ok := cid.(int64); ok {
+							tgChatID = v
+						} else if v, ok := cid.(int); ok {
+							tgChatID = int64(v)
+						} else if v, ok := cid.(float64); ok {
+							tgChatID = int64(v)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if tgSource && tgChatID != 0 {
+		fmt.Printf("[SendMessage] Sending to Telegram ChatID: %d\n", tgChatID)
+		if err := SendTelegramMessage(tgChatID, message); err != nil {
+			fmt.Printf("[SendMessage] Telegram Error: %v\n", err)
+			return err
+		}
+		
+		// Save conversation state if available (Required for AI flow)
+		if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok && len(wfEngine) > 0 {
+			lastResult := wfEngine[len(wfEngine)-1]
+			if lastResult.ResultNode != nil {
+				if resultMap, ok := lastResult.ResultNode.(map[string]interface{}); ok {
+					if conversationState, ok := resultMap["conversation_state"].(string); ok {
+						if userID, ok := c.Locals("userid").(int); ok && userID > 0 {
+							conversationDir := "./tmp/ai_conversations"
+							os.MkdirAll(conversationDir, 0755)
+							conversationFile := fmt.Sprintf("%s/%d.json", conversationDir, userID)
+							stateData := map[string]interface{}{
+								"conversation_state": conversationState,
+								"updated_at":         time.Now().Format(time.RFC3339),
+							}
+							if data, err := json.Marshal(stateData); err == nil {
+								os.WriteFile(conversationFile, data, 0644)
+								fmt.Printf("[SendMessage] Saved Telegram conversation state for user %d\n", userID)
+							}
+						}
+					}
+				}
+			}
+		}
+		
 		return nil
 	}
 

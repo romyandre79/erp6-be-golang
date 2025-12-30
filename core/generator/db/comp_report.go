@@ -3,7 +3,6 @@ package generator
 import (
 	"erp6-be-golang/core/configs"
 	"erp6-be-golang/core/helpers"
-	"erp6-be-golang/core/i18n"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -47,14 +46,13 @@ func handleReportServer(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB
 		dataPrint["title"+v] = v
 	}
 
-	lang := c.FormValue("lang")
 	userName := c.Locals("username").(string)
 	dataPrint["j_username"] = configs.ConfigApps.ReportUser
 	dataPrint["j_password"] = configs.ConfigApps.ReportPass
-	dataPrint["titlereport"] = i18n.Translate(lang, vReportName, nil)
-	dataPrint["titlerecordstatus"] = i18n.Translate(lang, "RECORD_STATUS", nil)
+	dataPrint["titlereport"] = vReportName
+	dataPrint["titlerecordstatus"] = "RECORD_STATUS"
 	dataPrint["titlecompany"] = configs.ConfigApps.AppName
-	dataPrint["titleuser"] = i18n.Translate(lang, "PRINT_BY", nil) + " " + userName
+	dataPrint["titleuser"] = "PRINT_BY" + " " + userName
 
 	timeOut, _ := strconv.Atoi(configs.ConfigApps.ReportTime)
 	query := url.Values{}

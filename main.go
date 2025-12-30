@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"erp6-be-golang/core/helpers"
-	"erp6-be-golang/core/i18n"
 	"erp6-be-golang/core/logger"
 	"erp6-be-golang/core/plugin"
 	"erp6-be-golang/models"
@@ -39,8 +38,6 @@ func main() {
 	backupPtr := flag.Bool("backup", false, "Backup database to file (default: backup.sql or backup.db)")
 	restorePtr := flag.String("restore", "", "Restore database from file")
 	flag.Parse()
-
-	i18n.Init()
 
 	// Load Config from .env
 	log.Print("Check Configuration ... ")
@@ -123,6 +120,27 @@ func main() {
 			log.Printf("Failed to init WhatsApp: %v", err)
 		}
 	}()
+
+	// Initialize Telegram DB
+	generator.SetTelegramDatabase(db)
+	
+	// Start Telegram Bot if token is configured
+	telegramToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	log.Printf("Checking Telegram configuration... Token length: %d", len(telegramToken))
+	
+	if telegramToken != "" {
+		log.Println("Starting Telegram Bot...")
+		go func() {
+			if err := generator.InitTelegram(telegramToken); err != nil {
+				log.Printf("Failed to init Telegram: %v", err)
+			} else {
+				log.Println("Telegram Bot initialized successfully!")
+			}
+		}()
+	} else {
+		log.Println("Telegram bot token NOT configured in .env (TELEGRAM_BOT_TOKEN is empty)")
+	}
+
 
 	// Load Cache from .env
 	_, err = cache.NewCache()

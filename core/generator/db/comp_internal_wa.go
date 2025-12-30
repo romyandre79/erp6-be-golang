@@ -2,6 +2,7 @@ package generator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,8 +10,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/mdp/qrterminal/v3"
 	"github.com/valyala/fasthttp"
+	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -239,123 +240,171 @@ func eventHandler(evt interface{}) {
 		
 		fmt.Printf("[WA Debug] extracted text: %s\n", text)
 
+	// Create a proper fasthttp request context for ExecuteFlow
 		if text != "" && waDB != nil {
-			// Get conversation state for this user
-			stateJSON := getWAUserState(senderPhone)
-			dbDriver := waDB.Dialector.Name()
-			result, err := processAI(text, stateJSON, dbDriver, userIDStr, waDB)
-			if err != nil {
-				fmt.Printf("[WA Debug] processAI Error: %v\n", err)
-				SendMessage(senderPhone+"@s.whatsapp.net", fmt.Sprintf("Error: %v", err))
-				return
-			}
-			
-			fmt.Printf("[WA Debug] processAI Result: %+v\n", result)
+		var reqCtx fasthttp.RequestCtx
+		reqCtx.Request.Header.SetMethod("POST")
+		reqCtx.Request.SetRequestURI("/whatsapp/aicommand")
+		
+		// Set command parameter for AIAssistant
+		reqCtx.PostArgs().Set("command", text)
+		
+		// Create Fiber app and acquire context
+		app := fiber.New()
+		c := app.AcquireCtx(&reqCtx) // Properly acquire context
+		defer app.ReleaseCtx(c)      // Release when done
+		
+		// Set up context locals (simulating middleware)
+		c.Locals("userid", user.Useraccessid)
+		c.Locals("username", user.Username)
+		c.Locals("db", waDB)
+		
+		// Initialize wfEngine tracking
+		c.Locals("wfEngine", []WorkflowEngine{})
+		c.Locals("flowTerminated", false)
+		c.Locals("components", []Component{})
 
-			if newState, ok := result["conversation_state"].(string); ok {
-				saveWAUserState(senderPhone, newState)
-			}
-			
-			msg, _ := result["message"].(string)
 
-			// Handle execution via full workflow (same as web)
-			if exec, ok := result["execute"].(string); ok && exec == "true" {
-				fmt.Printf("[WA Debug] Executing aicommand workflow\n")
-				
-				// Create a proper fasthttp request context
-				var reqCtx fasthttp.RequestCtx
-				reqCtx.Request.Header.SetMethod("POST")
-				reqCtx.Request.SetRequestURI("/whatsapp/aicommand")
-				
-				// Create Fiber app and acquire context
-				app := fiber.New()
-				c := app.AcquireCtx(&reqCtx)
-				defer app.ReleaseCtx(c)
-				
-				// Set up context locals (authorization)
-				c.Locals("userid", user.Useraccessid)
-				c.Locals("username", user.Username)
-				c.Locals("db", waDB)
-				c.Locals("wfEngine", []WorkflowEngine{})
-				
-				// Get conversation state
-				stateJSON := getWAUserState(senderPhone)
-				
-				// Prepare workflow parameters
-				params := map[string]interface{}{
-					"command":            text,
-					"conversation_state": stateJSON,
-					"user_id":           fmt.Sprintf("%d", user.Useraccessid),
-				}
-				
-				fmt.Printf("[WA Debug] Executing workflow with params: %+v\n", params)
-				
-				// Execute the aicommand workflow
-				if err := ExecuteFlow(c, waDB, "aicommand", false, params); err != nil {
-					fmt.Printf("[WA Debug] Workflow execution error: %v\n", err)
-					msg = fmt.Sprintf("❌ Execution Failed: %v", err)
-				} else {
-					// Debug: Print all wfEngine nodes
-					if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
-						fmt.Printf("[WA Debug] wfEngine has %d nodes:\n", len(wfEngine))
-						for i, node := range wfEngine {
-							fmt.Printf("[WA Debug] Node %d: %s\n", i, node.ComponentName)
-							fmt.Printf("[WA Debug]   Input: %+v\n", node.DataInputNode)
-							fmt.Printf("[WA Debug]   Result: %+v\n", node.ResultNode)
+		// Inject callback for real-time WhatsApp messaging
+		// This allows components like SendMessage to trigger immediate updates
+		lastSentMsg := ""
+		waCallback := func(msg string) {
+			if msg != "" {
+				recipient := v.Info.Sender.User + "@s.whatsapp.net"
+				SendMessage(recipient, msg)
+				fmt.Printf("[WA Debug] Real-time message sent to %s: %s\n", recipient, msg)
+				lastSentMsg = msg
+			}
+		}
+		
+		// Initialize wfExtras with the callback
+		c.Locals("wfExtras", map[string]interface{}{
+			"send_wa_callback": waCallback,
+		})
+		
+		fmt.Printf("[WA Debug] Executing 'aicommand' workflow for user %d via ExecuteFlow\n", user.Useraccessid)
+		
+		// Initialize msg and excelFile variables for the new flow
+		msg := ""
+		excelFile := ""
+
+		// Execute the workflow
+		// Note: "aicommand" is the workflow name. 
+		// Params are mostly passed via FormValue (command), but we can pass extras too if needed.
+		params := map[string]interface{}{} 
+		if err := ExecuteFlow(c, waDB, "aicommand", false, params); err != nil {
+			fmt.Printf("[WA Debug] Workflow execution error: %v\n", err)
+			msg = fmt.Sprintf("❌ Execution Failed: %v", err)
+		} else {
+			// Workflow executed successfully. Check results in wfEngine.
+			if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
+				fmt.Printf("[WA Debug] wfEngine has %d nodes:\n", len(wfEngine))
+				for i, node := range wfEngine {
+					fmt.Printf("[WA Debug] Node %d: %s\n", i, node.ComponentName)
+					if resMap, ok := node.ResultNode.(map[string]interface{}); ok {
+						keys := getWAKeys(resMap)
+						fmt.Printf("[WA Debug]   Result Keys: %v\n", keys)
+						// Print specific debug values
+						if val, ok := resMap["meta_action"]; ok {
+							fmt.Printf("[WA Debug]   meta_action: %v\n", val)
+						}
+						if val, ok := resMap["execute"]; ok {
+							fmt.Printf("[WA Debug]   execute: %v\n", val)
+						}
+						if val, ok := resMap["message"]; ok {
+							// Truncate message if too long
+							msgStr := fmt.Sprintf("%v", val)
+							if len(msgStr) > 50 {
+								msgStr = msgStr[:47] + "..."
+							}
+							fmt.Printf("[WA Debug]   message: %s\n", msgStr)
 						}
 					}
-					
-					// Check if SendMessage component was executed (for formatted output)
-					foundSendMessage := false
-					if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
-						for _, node := range wfEngine {
-							if node.ComponentName == "sendmessage" || node.ComponentName == "SendMessage" {
-								foundSendMessage = true
-								fmt.Printf("[WA Debug] Found SendMessage node\n")
-								// Extract the message from SendMessage's result (not input params)
-								if resMap, ok := node.ResultNode.(map[string]interface{}); ok {
-									fmt.Printf("[WA Debug] SendMessage result: %+v\n", resMap)
-									if sendMsg, ok := resMap["message"].(string); ok && sendMsg != "" {
-										msg = sendMsg
-										fmt.Printf("[WA Debug] Using formatted message from SendMessage result: %s\n", sendMsg)
-									}
+				}
+				
+				// 1. Find the AI result to save conversation state and potentially excel_file
+				for _, node := range wfEngine {
+					if node.ComponentName == "AIAssistant" || node.ComponentName == "AI Assistant" {
+						if resMap, ok := node.ResultNode.(map[string]interface{}); ok {
+							if newState, ok := resMap["conversation_state"].(string); ok {
+								saveWAUserState(userIDStr, newState)
+								fmt.Printf("[WA Debug] Saved conversation state from AI node\n")
+							}
+							if file, ok := resMap["excel_file"].(string); ok && file != "" {
+								excelFile = file
+								fmt.Printf("[WA Debug] Extracted excel_file from AI node: %s\n", excelFile)
+							}
+						}
+					}
+				}
+				
+				// 2. Find the Final Message
+				// Priority: SendMessage component -> Last component with "message" -> Generic Success
+				foundSendMessage := false
+				for _, node := range wfEngine {
+					if strings.EqualFold(node.ComponentName, "sendmessage") {
+						if inputParams, ok := node.DataInputNode.(map[string]string); ok {
+							var candidateMsg string
+							if sendMsg, ok := inputParams["message"]; ok && sendMsg != "" {
+								candidateMsg = strings.TrimSpace(ResolveParam(c, sendMsg))
+							} else if sendMsg, ok := inputParams["messagenotif"]; ok && sendMsg != "" {
+								candidateMsg = strings.TrimSpace(ResolveParam(c, sendMsg))
+							}
+							
+							// Only update if it's not the generic "processing" message
+							if candidateMsg != "" && !strings.Contains(candidateMsg, "Processing your request") {
+								// DEDUPLICATION: check against lastSentMsg
+								if candidateMsg == lastSentMsg {
+									fmt.Printf("[WA Debug] Skipping duplicate message (already sent via callback): %s\n", candidateMsg)
+									// If we skipped it, we consider it "found" (handled), so we don't look for fallbacks
+									foundSendMessage = true 
+									msg = "" // explicitly clear msg
+								} else {
+									msg = candidateMsg
+									foundSendMessage = true
 								}
+							}
+						}
+					}
+				}
+				
+				if !foundSendMessage {
+					// Check for Scraper or other component results
+					// Iterate backwards
+					for i := len(wfEngine) - 1; i >= 0; i-- {
+						node := wfEngine[i]
+						
+						// Skip AIAssistant if it was an execution step (outcome should come from the executed component)
+						// AIAssistant comes LAST in the log but the executed component (Scraper) comes BEFORE it
+						if (node.ComponentName == "AIAssistant" || node.ComponentName == "AI Assistant") {
+							if resMap, ok := node.ResultNode.(map[string]interface{}); ok {
+								if exec, ok := resMap["execute"].(string); ok && exec == "true" {
+									fmt.Printf("[WA Debug] Skipping AIAssistant result (delegate execution)\n")
+									continue 
+								}
+							}
+						}
+
+						// Scraper usually puts formatted message in "message" of ResultNode
+						if resMap, ok := node.ResultNode.(map[string]interface{}); ok {
+							if formattedMsg, ok := resMap["message"].(string); ok && formattedMsg != "" {
+								msg = formattedMsg
 								break
 							}
 						}
 					}
-					
-					if !foundSendMessage {
-						// No SendMessage component found, check wfEngine for message
-						fmt.Printf("[WA Debug] SendMessage component not found, checking wfEngine for message\n")
-						if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
-							// Look for the last node with a "message" field
-							for i := len(wfEngine) - 1; i >= 0; i-- {
-								node := wfEngine[i]
-								if resMap, ok := node.ResultNode.(map[string]interface{}); ok {
-									if formattedMsg, ok := resMap["message"].(string); ok && formattedMsg != "" {
-										// Check if it's not just a generic success message
-										if formattedMsg != msg && !strings.Contains(formattedMsg, "processed successfully") {
-											msg = formattedMsg
-											fmt.Printf("[WA Debug] Using formatted message from wfEngine: %s\n", formattedMsg)
-											break
-										}
-									}
-								}
-							}
-						}
-						
-						// If still no formatted message, show generic success
-						if msg == "" || msg == "Data Customer sent" {
-							msg = "✅ Command Executed Successfully"
-						}
-					}
 				}
 			}
-
-			if msg != "" {
+		}
+		
+		// Note: We don't need manual processAI call anymore since ExecuteFlow runs the AI node.
+		// However, we need to ensure the "aicommand" workflow actually exists and has the AI node.
+		// If not, we fall back? No, user requested "like web".
+		
+		// Send reply
+		if msg != "" {
 				// Check if there's an Excel file to send
-				if excelFile, ok := result["excel_file"].(string); ok && excelFile != "" {
+				if excelFile != "" { // Use the excelFile variable extracted from the workflow
 					fmt.Printf("[WA Debug] Sending Excel file: %s\n", excelFile)
 					recipientJID := senderPhone + "@s.whatsapp.net"
 					if err := SendDocument(recipientJID, excelFile, msg); err != nil {
@@ -378,6 +427,7 @@ func eventHandler(evt interface{}) {
 				}
 			}
 		}
+
 	}
 }
 
@@ -415,20 +465,60 @@ func formatResult(data interface{}) string {
 	}
 }
 
-// Simple in-memory state store for WA users (should be DB in production)
-var waUserStates = make(map[string]string)
-var waStateMutex sync.Mutex
+func getWAKeys(m map[string]interface{}) []string {
+    keys := make([]string, 0, len(m))
+    for k := range m {
+        keys = append(keys, k)
+    }
+    return keys
+}
 
+// File-based state persistence matching workflow engine
 func getWAUserState(userID string) string {
-	waStateMutex.Lock()
-	defer waStateMutex.Unlock()
-	return waUserStates[userID]
+	// userID is the DB ID (e.g., "2"), not the phone number
+	filename := fmt.Sprintf("./tmp/ai_conversations/%s.json", userID)
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return "{}" 
+	}
+	
+	// Extract just the conversation_state string if stored as full JSON
+	var stateMap map[string]interface{}
+	if err := json.Unmarshal(data, &stateMap); err == nil {
+		if val, ok := stateMap["conversation_state"].(string); ok {
+			return val
+		}
+	}
+	
+	return string(data)
 }
 
 func saveWAUserState(userID, state string) {
-	waStateMutex.Lock()
-	defer waStateMutex.Unlock()
-	waUserStates[userID] = state
+	// Ensure directory exists
+	os.MkdirAll("./tmp/ai_conversations", 0755)
+	
+	filename := fmt.Sprintf("./tmp/ai_conversations/%s.json", userID)
+	
+	// We should store it in the same format as comp_ai.go expects?
+	// comp_ai.go writes:
+	/*
+		stateToSave := map[string]interface{}{
+			"conversation_state": stateBytes, // string
+			"user_id":            userID,
+			"updated_at":         time.Now(),
+		}
+	*/
+	// So we should wrap it.
+	
+	stateToSave := map[string]interface{}{
+		"conversation_state": state,
+		"user_id":            userID,
+		"updated_at":         time.Now(),
+	}
+	
+	if data, err := json.MarshalIndent(stateToSave, "", "  "); err == nil {
+		os.WriteFile(filename, data, 0644)
+	}
 }
 
 func GetLoginQR() (string, error) {

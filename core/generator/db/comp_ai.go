@@ -134,6 +134,8 @@ func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *Workflow
 		return nil // Nothing to execute
 	}
 	
+	fmt.Printf("[ExecuteAIResult T_RACE] Started. Result: %+v\n", aiResult)
+	
 	metaAction, _ := aiResult["meta_action"].(string)
 	
 	// SQL Execution
@@ -227,8 +229,10 @@ func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *Workflow
 	componentName := ""
 	if action, ok := aiResult["action"].(string); ok {
 		componentName = action
-		// Map known actions
-		if action == "extract_one_data" || action == "extract_data" {
+		// Map known actions to Web Scraper
+		switch action {
+		case "extract_one_data", "extract_data", "extract_links", "extract_text", "extract_images", 
+		     "submit_and_extract", "extract_with_regex", "solve_captcha", "extract_hierarchy", "get_html":
 			componentName = "Web Scraper"
 		}
 	}
@@ -245,7 +249,7 @@ func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *Workflow
 			if ctx.FiberCtx == nil {
 				fmt.Printf("[ExecuteAIResult] WhatsApp context - executing component directly\n")
 				
-				// For WhatsApp, execute the Search component directly
+				// For WhatsApp, execute the Search component directly or handle specific meta_actions
 				// Map meta_action to component and parameters
 				switch metaAction {
 				case "data_customer":
@@ -260,13 +264,27 @@ func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *Workflow
 					formattedMsg := formatDataAsTable(customerData)
 					aiResult["message"] = formattedMsg
 					fmt.Printf("[ExecuteAIResult] Formatted message for WhatsApp: %s\n", formattedMsg)
-					
+				
 				default:
-					return fmt.Errorf("no WhatsApp handler for meta_action: %s", metaAction)
+					// Check if we can map other meta_actions
+					// If URL is present, fallback to Web Scraper
+					if url, ok := aiResult["url"].(string); ok && url != "" {
+						fmt.Printf("[ExecuteAIResult] URL found, falling back to Web Scraper for meta_action: %s\n", metaAction)
+						componentName = "Web Scraper"
+						// Force browser method for consistency
+						aiResult["method"] = "browser"
+					} else {
+						// If not implemented, just return nil (Workflow routing will happen in Decision node for Web)
+						// For WA, this means no action, but maybe message is already set
+						fmt.Printf("[ExecuteAIResult] No direct WA handler for meta_action: %s\n", metaAction)
+					}
 				}
 			}
 			
-			return nil
+			// If we set a componentName (e.g. fallback), don't return nil, let it proceed to execution
+			if componentName == "" {
+				return nil
+			}
 		}
 	}
 	
@@ -277,10 +295,14 @@ func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *Workflow
 	// Execute component
 	handler, ok := GetComponent(componentName)
 	if !ok {
+		fmt.Printf("[ExecuteAIResult TRACE] Component '%s' not found!\n", componentName)
 		return fmt.Errorf("component '%s' not found", componentName)
 	}
 	
-	return handler.Execute(ctx)
+	fmt.Printf("[ExecuteAIResult TRACE] Executing component: %s\n", componentName)
+	err := handler.Execute(ctx)
+	fmt.Printf("[ExecuteAIResult TRACE] Component execution finished. Error: %v\n", err)
+	return err
 }
 
 func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[string]interface{}, error) {
@@ -369,10 +391,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 				break
 			}
 
-			if strings.HasPrefix(lowerCmd, "create "+entity.Name) ||
-				strings.HasPrefix(lowerCmd, "create "+entity.Name+"s") ||
-				strings.HasPrefix(lowerCmd, "make "+entity.Name) ||
-				strings.HasPrefix(lowerCmd, "execute "+entity.Name) {
+			if 	strings.HasPrefix(lowerCmd, "execute "+entity.Name) {
 				matchedEntity = entity.Name
 				// Extract arg
 				prefixes := []string{"create ", "make ", "execute "}
@@ -454,35 +473,6 @@ func runConversationStep(command string, state AIConversationState, dbDriver, us
 		return nil, err
 	}
 
-	// If no questions, execute immediately
-	if len(flow.Questions) == 0 {
-		query, params, reply, metaAction, err := generateQueryFromData(state.EntityType, state.CollectedData, dbDriver, userID, db)
-		if err != nil {
-			return nil, err
-		}
-
-		result := map[string]interface{}{
-			"execute":            "true",
-			"query":              query,
-			"parameters":         params,
-			"meta_action":        metaAction,
-			"message":            reply,
-			"completed":          true,
-			"conversation_state": "{}",
-			"user_id":            userID,
-		}
-		// Unmarshal query if JSON
-		if strings.HasPrefix(strings.TrimSpace(query), "{") {
-			var queryMap map[string]interface{}
-			if err := json.Unmarshal([]byte(query), &queryMap); err == nil {
-				for k, v := range queryMap {
-					result[k] = v
-				}
-			}
-		}
-		return result, nil
-	}
-
 	// Handle Initial Arg for first Q
 	if state.CurrentStep == 0 && initialArg != "" && len(flow.Questions) > 0 {
 		firstQ := flow.Questions[0]
@@ -509,6 +499,12 @@ func runConversationStep(command string, state AIConversationState, dbDriver, us
 				"conversation_state": "{}",
 				"user_id":            userID,
 			}
+
+			// Add collected data to result so it's available for parameters
+			for k, v := range state.CollectedData {
+				result[k] = v
+			}
+
 			// Unmarshal query if JSON
 			if strings.HasPrefix(strings.TrimSpace(query), "{") {
 				var queryMap map[string]interface{}
@@ -776,9 +772,18 @@ func generateQueryFromData(entityType string, data map[string]string, dbDriver, 
 		metaAction = "workflow"
 	}
 	
-	// For workflow-routing commands: return empty query with meta_action
-	// The Decision component will use meta_action to route to the correct workflow
-	return "", "[]", successMsg, metaAction, nil
+	// Determine query template based on driver
+	queryTmpl := ""
+	if val, ok := flow.Queries[dbDriver]; ok {
+		queryTmpl = val
+	} else if val, ok := flow.Queries["default"]; ok {
+		queryTmpl = val
+	}
+	
+	// Process query template (this contains the Scraper JSON config for scraping commands)
+	query := processTemplate(queryTmpl, data)
+	
+	return query, "[]", successMsg, metaAction, nil
 }
 
 func processTemplate(tmpl string, data map[string]string) string {

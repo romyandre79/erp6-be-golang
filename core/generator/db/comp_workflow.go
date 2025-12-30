@@ -132,12 +132,14 @@ func handleWorkflow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, se
 		
 		// So we MUST append our result node manually to parentWfEngine.
 		
+		// Flatten nested workflow history into parent history
+		// This ensures WA handler can see SendMessage/Scraper nodes that executed inside the sub-workflow
 		finalWfEngine := c.Locals("wfEngine").([]WorkflowEngine)
-		finalWfEngine = append(finalWfEngine, WorkflowEngine{
-			ResultNode: mergedResults,
-			Success:    true,
-		})
+		finalWfEngine = append(finalWfEngine, childWfEngine...)
 		c.Locals("wfEngine", finalWfEngine)
+		
+		// For variable resolution (ResolveParam), having child nodes in history is sufficient.
+		// The mergedResults logic above is kept if we need a summary node, but InternalFlow will handle the Workflow component node.
 		
 		return nil
 	} else {

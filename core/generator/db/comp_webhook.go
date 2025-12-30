@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"fmt"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -11,6 +12,7 @@ func init() {
 }
 
 func handleWebhook(c *fiber.Ctx) error {
+	fmt.Printf("[Webhook] Received request: %s %s\n", c.Method(), c.OriginalURL())
 	resultStat := make(map[string]interface{})
 
 	// Capture Body
