@@ -118,11 +118,11 @@ func main() {
 	generator.SetWADatabase(db)
 	
 	// Start WA Client immediately
-	/*go func() {
+	go func() {
 		if err := generator.InitWhatmeow(); err != nil {
 			log.Printf("Failed to init WhatsApp: %v", err)
 		}
-	}()*/
+	}()
 
 	// Load Cache from .env
 	_, err = cache.NewCache()
