@@ -6,6 +6,10 @@ import (
 	"strings"
 	"sync"
 	"os"
+	"net/http"
+	"io"
+	"path/filepath"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"gorm.io/gorm"
@@ -18,6 +22,32 @@ var (
 	tgBotMutex sync.Mutex
 	tgDB       *gorm.DB
 )
+
+// Helper to check and mark update as processed using ATOMIC FILE LOCK
+// This works even if Fiber is running in Prefork mode (multiple processes)
+func isUpdateProcessed(updateID int) bool {
+	// Ensure directory exists
+	os.MkdirAll("./tmp/telegram_updates", 0755)
+	
+	lockFile := fmt.Sprintf("./tmp/telegram_updates/%d.lock", updateID)
+	// Try to create a file EXCLUSIVELY.
+	f, err := os.OpenFile(lockFile, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0666)
+	
+	if err != nil {
+		if os.IsExist(err) {
+			// File exists = Already processed
+			fmt.Printf("[Telegram Debug] DEDUPE HIT: Lock file exists for ID %d\n", updateID)
+			return true
+		}
+		// Other error
+		fmt.Printf("[Telegram Debug] DEDUPE ERROR for ID %d: %v. Assuming processed to be safe.\n", updateID, err)
+		return true 
+	}
+	
+	fmt.Printf("[Telegram Debug] DEDUPE PASS: Created lock file for ID %d\n", updateID)
+	f.Close()
+	return false
+}
 
 // SetTelegramDatabase sets the DB instance for Telegram processing
 func SetTelegramDatabase(db *gorm.DB) {
@@ -80,6 +110,26 @@ func init() {
 			return fmt.Errorf("failed to unmarshal update: %v", err)
 		}
 
+		fmt.Printf("[Telegram Debug] Received UpdateID: %d\n", update.UpdateID)
+
+		// Strong Deduplication: ALWAYS use MessageID if available, as it is constant across retries.
+		// UpdateID *might* change (though unlikely, better safe).
+		dedupeID := 0
+		if update.Message != nil {
+			dedupeID = update.Message.MessageID
+			fmt.Printf("[Telegram Debug] Using MessageID for Dedupe: %d\n", dedupeID)
+		} else {
+			dedupeID = update.UpdateID
+			fmt.Printf("[Telegram Debug] No MessageID, using UpdateID: %d\n", dedupeID)
+		}
+
+		if dedupeID != 0 {
+			if isUpdateProcessed(dedupeID) {
+				fmt.Printf("[Telegram] Duplicate ID %d ignored (retry suppressed)\n", dedupeID)
+				return nil
+			}
+		}
+
 		if update.Message == nil {
 			return nil // No message to process
 		}
@@ -91,8 +141,99 @@ func init() {
 		userName := message.From.UserName
 
 		fmt.Printf("[Telegram] Processing message from %s (ID: %d): %s\n", userName, telegramUserID, text)
-
-
+		
+		// Handle Media/Files
+		var fileID string
+		var fileName string
+		fileType := ""
+		
+		if message.Document != nil {
+			fileID = message.Document.FileID
+			fileName = message.Document.FileName
+			fileType = "document"
+		} else if message.Photo != nil && len(message.Photo) > 0 {
+			// Photos are arrays of different sizes, get the largest one (last one)
+			photo := message.Photo[len(message.Photo)-1]
+			fileID = photo.FileID
+			fileName = fmt.Sprintf("photo_%d.jpg", time.Now().UnixNano())
+			fileType = "photo"
+		} else if message.Video != nil {
+			fileID = message.Video.FileID
+			fileName = fmt.Sprintf("video_%d.mp4", time.Now().UnixNano())
+			fileType = "video"
+		} else if message.Audio != nil {
+			fileID = message.Audio.FileID
+			fileName = message.Audio.FileName
+			if fileName == "" {
+				fileName = fmt.Sprintf("audio_%d.mp3", time.Now().UnixNano())
+			}
+			fileType = "audio"
+		} else if message.Voice != nil {
+			fileID = message.Voice.FileID
+			fileName = fmt.Sprintf("voice_%d.ogg", time.Now().UnixNano())
+			fileType = "voice"
+		}
+		
+		if fileID != "" {
+			fmt.Printf("[Telegram] Received %s with FileID: %s\n", fileType, fileID)
+			
+			// Get File URL
+			fileConfig := tgbotapi.FileConfig{FileID: fileID}
+			fileInfo, err := tgBot.GetFile(fileConfig)
+			if err != nil {
+				fmt.Printf("[Telegram] Failed to get file info: %v\n", err)
+				SendTelegramMessage(chatID, "❌ Failed to retrieve file info")
+			} else {
+				// Construct URL: https://api.telegram.org/file/bot<token>/<file_path>
+				// tgbotapi helper:
+				fileURL := fileInfo.Link(tgBot.Token)
+				
+				// Download File
+				resp, err := http.Get(fileURL)
+				if err != nil {
+					fmt.Printf("[Telegram] Failed to download file: %v\n", err)
+					SendTelegramMessage(chatID, "❌ Failed to download file")
+				} else {
+					defer resp.Body.Close()
+					
+					// Save File
+					saveDir := fmt.Sprintf("./public/uploads/telegram/%s", time.Now().Format("2006-01-02"))
+					os.MkdirAll(saveDir, 0755)
+					
+					// Sanitize filename lightly
+					fileName = strings.ReplaceAll(fileName, "..", "")
+					if fileName == "" { fileName = "unknown_file" }
+					
+					savePath := filepath.Join(saveDir, fileName)
+					out, err := os.Create(savePath)
+					if err != nil {
+						fmt.Printf("[Telegram] Failed to create file: %v\n", err)
+						SendTelegramMessage(chatID, "❌ Failed to save file on server")
+					} else {
+						_, err = io.Copy(out, resp.Body)
+						out.Close()
+						if err != nil {
+							fmt.Printf("[Telegram] Failed to write file: %v\n", err)
+							SendTelegramMessage(chatID, "❌ Failed to write file content")
+						} else {
+							fmt.Printf("[Telegram] File saved to: %s\n", savePath)
+							SendTelegramMessage(chatID, fmt.Sprintf("✅ File received and saved: %s", fileName))
+							
+							// If text is empty (just caption?), use caption
+							if text == "" && message.Caption != "" {
+								text = message.Caption
+								fmt.Printf("[Telegram] Using caption as command: %s\n", text)
+							}
+							
+							// If still no text, we just saved the file. Return?
+							if text == "" {
+								return nil
+							}
+						}
+					}
+				}
+			}
+		}
 		// 3. Authorize User
 		user, err := authorizeTelegramUser(telegramUserID)
 		if err != nil {
@@ -103,48 +244,160 @@ func init() {
 
 		// 4. Get Conversation State (Using DB ID)
 		stateJSON := getTelegramUserState(fmt.Sprintf("%d", user.Useraccessid))
-		
 		fmt.Printf("[Telegram] User %s (DB ID: %d) authorized. State loaded.\n", userName, user.Useraccessid)
+		fmt.Printf("[Telegram Debug] State Content: %s\n", stateJSON); // DEBUG PRINT
 
-		// 5. Prepare Result for Next Nodes (e.g. comp_ai)
-		result := map[string]interface{}{
-			"command":            text,
-			"user_id":            user.Useraccessid, // Int
-			"user_id_str":        fmt.Sprintf("%d", user.Useraccessid),
-			"username":           user.Username,
-			"conversation_state": stateJSON,
-			"chat_id":            chatID,            // Needed for reply
-			"telegram_user_id":   telegramUserID,
-			"source":             "telegram",
+		// 5. Setup for ExecuteFlow ("aicommand")
+		
+		// Inject Real-Time Callback (similar to WA)
+		realMessageSent := false
+		
+		tgCallback := func(msg string) {
+			if msg != "" {
+				SendTelegramMessage(chatID, msg)
+				fmt.Printf("[Telegram] Real-time message sent to %d: %s\n", chatID, msg)
+				
+				if !strings.Contains(msg, "Processing") {
+					realMessageSent = true
+					fmt.Printf("[Telegram Debug] Callback triggered (Msg: %s). realMessageSent=TRUE\n", msg)
+				}
+			}
 		}
 
-		// Store result for next node
-		// Usually handled by framework returning this map, but explicit handling:
-		// The `Execute` signature returns error. 
-		// The framework appends the result to `wfEngine` using the return of this function?
-		// Wait, `RegisterComponent` definition passes logic that returns error.
-		// `ExecuteFlow` calls `component.Execute(ctx)`. 
-		// `Execute` (in comp_ai.go example) appends to `wfEngine` manually?
-		// Let's check `comp_ai.go`... yes, it does `ctx.FiberCtx.Locals("wfEngine", ...)`
-		
-		// So we must manually append result to wfEngine
-		wm := WorkflowEngine{
-			ComponentName: "Telegram",
-			ResultNode:    result,
-			Success:       true,
-		}
+		ctx.FiberCtx.Locals("wfExtras", map[string]interface{}{
+			"send_wa_callback": tgCallback,
+		})
+		// Also set directly to avoid map casting issues in sendmessage
+		ctx.FiberCtx.Locals("send_wa_callback", tgCallback)
 
-		wfEngine, _ := ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine)
-		wfEngine = append(wfEngine, wm)
-		ctx.FiberCtx.Locals("wfEngine", wfEngine)
-		
-		// ALSO set context params for `comp_ai` implicit lookup?
-		// `comp_ai` looks at `ctx.Params` (explicit mapping) or `ctx.FiberCtx.Locals("userid")`.
-		
 		ctx.FiberCtx.Locals("userid", user.Useraccessid)
 		ctx.FiberCtx.Locals("username", user.Username)
-		ctx.FiberCtx.Locals("db", tgDB) // important for AI
-		
+		ctx.FiberCtx.Locals("db", tgDB)
+
+        // Stop the Graph from proceeding to the next node (Double Execution Killer)
+        // MOVED TO END: Setting it here causes child nodes in ExecuteFlow to consume/reset it!
+        // ctx.FiberCtx.Locals("skipNavigation", true)
+        fmt.Printf("[Telegram Debug] Manual Execution Mode.\n")
+        
+        // Pass command AND existing state to workflow
+        params := map[string]interface{}{
+            "command": text,
+            "conversation_state": stateJSON, // Pass state so AI component can use it
+        }
+
+        if err := ExecuteFlow(ctx.FiberCtx, tgDB, "aicommand", false, params); err != nil {
+            fmt.Printf("[Telegram] Workflow execution error: %v\n", err)
+            SendTelegramMessage(chatID, fmt.Sprintf("❌ Error: %v", err))
+            return nil
+        }
+       
+        // 6. Process Results
+        // Now valid because ExecuteFlow has populated wfEngine
+        
+		if wfEngine, ok := ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine); ok {
+            msg := ""
+            excelFile := ""
+            foundSendMessage := false
+            
+            fmt.Printf("[Telegram Debug] Starting Result Scan.\n")
+
+            for i := len(wfEngine) - 1; i >= 0; i-- {
+                // Debug node
+                node := wfEngine[i]
+                fmt.Printf("[Telegram Debug] Scanning Node %d: %s\n", i, node.ComponentName)
+                
+                resMap, ok := node.ResultNode.(map[string]interface{})
+                if !ok {
+                	continue
+                }
+
+                // SAVE STATE: Check for conversation_state update
+                // Accept from ANY component (e.g. SaveLog might carry it too)
+                // if strings.EqualFold(node.ComponentName, "AIAssistant") || ... { // Too restrictive!
+                
+                if newState, ok := resMap["conversation_state"].(string); ok && newState != "" {
+                		// Only save if it looks like JSON or valid state
+                		if strings.HasPrefix(newState, "{") {
+							fmt.Printf("[Telegram] Saving conversation state from node '%s' for user %d\n", node.ComponentName, user.Useraccessid)
+	 						fmt.Printf("[Telegram Debug] New State to Save: %s\n", newState)
+	 						
+	 						// Helper to save state
+							conversationDir := "./tmp/ai_conversations"
+							os.MkdirAll(conversationDir, 0755)
+							conversationFile := fmt.Sprintf("%s/%d.json", conversationDir, user.Useraccessid)
+							stateData := map[string]interface{}{
+								"conversation_state": newState,
+								"updated_at":         "now", // timestamp
+							}
+							if data, err := json.Marshal(stateData); err == nil {
+								os.WriteFile(conversationFile, data, 0644)
+							}
+                		}
+                }
+
+                 // Check for file
+                if file, ok := resMap["excel_file"].(string); ok && file != "" {
+                    excelFile = file
+                }
+
+                // Check for message
+				candidateMsg := ""
+                if m, ok := resMap["message"].(string); ok && m != "" {
+                    candidateMsg = m
+                } else if m, ok := resMap["result"].(string); ok && m != "" {
+                    candidateMsg = m
+                } else if strings.EqualFold(node.ComponentName, "sendmessage") {
+                     if inputParams, ok := node.DataInputNode.(map[string]string); ok {
+                         if sendMsg, ok := inputParams["message"]; ok && sendMsg != "" {
+                             candidateMsg = ResolveParam(ctx.FiberCtx, sendMsg)
+                         }
+                     }
+                }
+
+				if candidateMsg != "" {
+                    if strings.Contains(candidateMsg, "Processing your request") {
+                        continue
+                    }
+                    
+                    candidateMsg = strings.TrimSpace(candidateMsg)
+                    msg = candidateMsg
+                    foundSendMessage = true
+                }
+                
+                if foundSendMessage {
+                    break
+                }
+            }
+
+            // We have real-time callback, so we usually don't need to send 'msg' again
+            // UNLESS the callback wasn't used (e.g. Scraper fallback).
+            // But for AI, it uses SendMessage.
+            // Let's rely on callback for main message.
+            // Only send if NOT sent via callback? 
+             
+            if msg != "" && !realMessageSent {
+                 SendTelegramMessage(chatID, msg)
+                 fmt.Printf("[Telegram Debug] Sending fallback message (realMessageSent=FALSE): %s\n", msg)
+            }
+
+            if excelFile != "" {
+                 SendTelegramMessage(chatID, "📂 File Generated: " + excelFile)
+            }
+            
+            // Legacy/Fallback check: If no callback fired, send result?
+            // Safe to ignore for now if AI workflow works.
+        }
+        
+        // CRITICAL DE-DUPLICATION FIX:
+        // Set skipNavigation to TRUE here, at the very end.
+        // This ensures proper state saving and workflow execution happened above via manual call.
+        // Now we tell the PARENT graph engine to STOP and not proceed to the "AI Command" node in the graph.
+        // Doing this here avoids child nodes (in ExecuteFlow) from consuming/resetting the flag.
+        fmt.Printf("[Telegram Debug] Stopping Graph Navigation to prevent Double Execution.\n")
+        ctx.FiberCtx.Locals("skipNavigation", true)
+        
+		return nil
+        
 		return nil
 	})
 	

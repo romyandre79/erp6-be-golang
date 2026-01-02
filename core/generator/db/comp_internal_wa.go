@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -232,10 +233,73 @@ func eventHandler(evt interface{}) {
 		senderPhone := phoneNumber
 
 		text := ""
+		mediaType := ""
+		var mediaData []byte
+		var mediaErr error
+		fileName := ""
+
 		if v.Message.GetConversation() != "" {
 			text = v.Message.GetConversation()
 		} else if v.Message.GetExtendedTextMessage().GetText() != "" {
 			text = v.Message.GetExtendedTextMessage().GetText()
+		} else {
+			// Check for Media
+			if img := v.Message.GetImageMessage(); img != nil {
+				mediaType = "image"
+				text = img.GetCaption()
+				mediaData, mediaErr = waClient.Download(context.Background(), v.Message.GetImageMessage())
+				fileName = "image_" + v.Info.ID + ".jpg"
+				if img.Mimetype != nil && strings.HasSuffix(*img.Mimetype, "png") {
+					fileName = "image_" + v.Info.ID + ".png"
+				}
+			} else if doc := v.Message.GetDocumentMessage(); doc != nil {
+				mediaType = "document"
+				text = doc.GetCaption()
+				mediaData, mediaErr = waClient.Download(context.Background(), v.Message.GetDocumentMessage())
+				fileName = doc.GetFileName()
+				if fileName == "" {
+					fileName = "doc_" + v.Info.ID
+				}
+			} else if vid := v.Message.GetVideoMessage(); vid != nil {
+				mediaType = "video"
+				text = vid.GetCaption()
+				mediaData, mediaErr = waClient.Download(context.Background(), v.Message.GetVideoMessage())
+				fileName = "video_" + v.Info.ID + ".mp4"
+			} else if aud := v.Message.GetAudioMessage(); aud != nil {
+				mediaType = "audio"
+				mediaData, mediaErr = waClient.Download(context.Background(), v.Message.GetAudioMessage())
+				fileName = "audio_" + v.Info.ID + ".ogg"
+				if aud.PTT != nil && *aud.PTT {
+					fileName = "voice_" + v.Info.ID + ".ogg"
+				}
+			}
+		}
+
+		if mediaType != "" {
+			fmt.Printf("[WA Debug] Received Media: %s, Size: %d bytes\n", mediaType, len(mediaData))
+			if mediaErr != nil {
+				fmt.Printf("[WA Debug] Failed to download media: %v\n", mediaErr)
+				SendMessage(senderPhone+"@s.whatsapp.net", "❌ Failed to download media")
+			} else {
+				// Save File
+				saveDir := fmt.Sprintf("./public/uploads/whatsapp/%s", time.Now().Format("2006-01-02"))
+				os.MkdirAll(saveDir, 0755)
+				savePath := filepath.Join(saveDir, fileName)
+				
+				if err := os.WriteFile(savePath, mediaData, 0644); err != nil {
+					fmt.Printf("[WA Debug] Failed to save media: %v\n", err)
+					SendMessage(senderPhone+"@s.whatsapp.net", "❌ Failed to save media")
+				} else {
+					fmt.Printf("[WA Debug] Media saved to: %s\n", savePath)
+					SendMessage(senderPhone+"@s.whatsapp.net", fmt.Sprintf("✅ File received and saved: %s", fileName))
+					
+					// If there is a caption (text), process it as a command?
+					// For now, let's just treat the caption as the command if present
+					if text == "" {
+						return // Stop here if no caption
+					}
+				}
+			}
 		}
 		
 		fmt.Printf("[WA Debug] extracted text: %s\n", text)

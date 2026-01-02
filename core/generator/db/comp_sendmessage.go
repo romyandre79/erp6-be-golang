@@ -140,6 +140,27 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 			fmt.Printf("[SendMessage] Replaced {{commandOutput}} template variable\n")
 		}
 	}
+	
+	// PRIORITY: Check for WhatsApp/Telegram callback in Locals (via comp_internal_*.go)
+	// This ensures messages sourced from WA/TG are routed back to them immediately,
+	// regardless of messageType (chat vs notification), preventing leaks to Web/DB.
+	if c != nil {
+		// Method 1: Direct Local (Telegram/New)
+		if callback, ok := c.Locals("send_wa_callback").(func(string)); ok {
+			fmt.Printf("[SendMessage] triggering WA/TG callback (Direct): %s\n", message)
+			callback(message)
+			return nil
+		}
+		
+		// Method 2: wfExtras Map (WhatsApp/Legacy)
+		if wfExtras, ok := c.Locals("wfExtras").(map[string]interface{}); ok {
+			if callback, ok := wfExtras["send_wa_callback"].(func(string)); ok {
+				fmt.Printf("[SendMessage] triggering WA/TG callback (Extras): %s\n", message)
+				callback(message)
+				return nil // Stop execution here
+			}
+		}
+	}
 
 	// Validate required parameters
 	if message == "" {
@@ -188,38 +209,7 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 		if c == nil {
 			// WhatsApp context - store message in wfEngine for WhatsApp handler to send
 			fmt.Printf("[SendMessage] WhatsApp context detected, storing message: %s\n", message)
-			
-			// Try to send immediate message via callback if available
-			// This enables "Processing..." messages to be sent in real-time
-			// Note: access wfExtras via closure-captured context logic? 
-			// Wait, c is nil, so we can't access Locals.
-			// BUT, handleSendMessage doesn't have access to the WorkflowContext struct which holds Extras.
-			// We need to pass Extras to handleSendMessage or Locals.
-			// Since c is nil, we can't use it.
-			
-			// We must rely on the caller (ExecuteFlow) to have populated something we can use.
-			// Actually, ExecuteFlow DOES pass a valid *fiber.Ctx even for valid internal flows!
-			// In comp_internal_wa.go we did: c := app.AcquireCtx(&reqCtx)
-			// So c IS NOT NIL in comp_internal_wa.go!
-			
-			// The check 'if c == nil' in original code was likely for old logic or strictly internal calls without Fiber.
-			// But our new comp_internal_wa implementation USES Fiber Ctx.
-			// So execution will likely NOT hit this 'if c == nil' block if called from comp_internal_wa.
-			// It will proceed to normal logic.
-			
-			// Let's verify:
-			// If c != nil, we can access Locals("wfExtras").
 			return nil
-		}
-		
-		// Check for WhatsApp callback in Locals
-		if wfExtras, ok := c.Locals("wfExtras").(map[string]interface{}); ok {
-			if callback, ok := wfExtras["send_wa_callback"].(func(string)); ok {
-				fmt.Printf("[SendMessage] triggering WA callback for: %s\n", message)
-				callback(message)
-				// PREVENT WEB BROADCAST: Return early so it doesn't also show up on the web UI
-				return nil
-			}
 		}
 		
 		// For chat messages, just send via WebSocket without saving to DB

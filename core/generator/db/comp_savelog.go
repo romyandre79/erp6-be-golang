@@ -32,13 +32,14 @@ func handleSaveLog(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) err
 
 	// Extract parameters from workflow
 	for _, p := range params {
+		val := ResolveParam(c, p.CompValue)
 		switch strings.ToLower(p.InputName) {
 		case "logtype":
-			logType = strings.ToLower(strings.TrimSpace(p.CompValue))
+			logType = strings.ToLower(strings.TrimSpace(val))
 		case "logdatatype":
-			logDataType = strings.ToLower(strings.TrimSpace(p.CompValue))
+			logDataType = strings.ToLower(strings.TrimSpace(val))
 		case "logcontent":
-			logContent = strings.TrimSpace(p.CompValue)
+			logContent = strings.TrimSpace(val)
 		}
 	}
 

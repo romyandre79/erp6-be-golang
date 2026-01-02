@@ -169,11 +169,7 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 				right := datas[1]
 
 				if strings.Contains(right, "$") {
-					key := strings.ReplaceAll(right, "$", "")
-					val := c.Query(key)
-					if val == "" {
-						val = c.FormValue(key)
-					}
+					val := ResolveParam(c, right)
 					switch driver {
 					case "mysql", "mariadb":
 						whereStat += fmt.Sprintf("(COALESCE(%s,'') <> '%s') ", left, val)
@@ -206,30 +202,18 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 
 						// Check if values are dynamic (from query/form)
 						if strings.HasPrefix(start, "$") {
-							key := start[1:]
-							val := c.Query(key)
-							if val == "" {
-								val = c.FormValue(key)
-							}
+							val := ResolveParam(c, start)
 							start = val
 						}
 						if strings.HasPrefix(end, "$") {
-							key := end[1:]
-							val := c.Query(key)
-							if val == "" {
-								val = c.FormValue(key)
-							}
+							val := ResolveParam(c, end)
 							end = val
 						}
 
 						whereStat += fmt.Sprintf("(%s BETWEEN '%s' AND '%s') ", left, start, end)
 					}
 				} else if strings.Contains(right, "$") {
-					key := strings.ReplaceAll(right, "$", "")
-					val := c.Query(key)
-					if val == "" {
-						val = c.FormValue(key)
-					}
+					val := ResolveParam(c, right)
 					whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, val)
 				} else {
 					if strings.Contains(data, "empty") {
@@ -238,11 +222,7 @@ func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr s
 						whereStat += fmt.Sprintf("exist (%s)", left)
 					} else {
 						if strings.Contains(right, "$") {
-							key := strings.ReplaceAll(right, "$", "")
-							val := c.Query(key)
-							if val == "" {
-								val = c.FormValue(key)
-							}
+							val := ResolveParam(c, right)
 							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, val)
 						} else {
 							whereStat += fmt.Sprintf("(COALESCE(%s,'') = '%s') ", left, right)

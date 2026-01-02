@@ -19,8 +19,9 @@ func handleWorkflow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, se
 	wfName := ""
 	wfParameter := ""
 	enable := true
+	fmt.Printf("[Workflow Debug] Params received: %+v\n", params)
 	for _, v := range params {
-		switch v.InputName {
+		switch strings.ToLower(v.InputName) {
 		case "workflowname":
 			wfName = strings.TrimSpace(ResolveParam(c, v.CompValue))
 		case "workflowparameter":
