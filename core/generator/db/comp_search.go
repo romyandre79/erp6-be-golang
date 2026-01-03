@@ -37,6 +37,7 @@ type SearchParams struct {
 	Page     int
 	Rows     int
 	Offset   int
+	IntoSingle string
 }
 
 func parseWhereClause(c *fiber.Ctx, db *gorm.DB, compValue string, userNameStr string, userId interface{}, isRow bool) string {
@@ -370,6 +371,8 @@ func parseSearchParams(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB,
 			if val == "false" {
 				sp.Enable = false
 			}
+		} else if name == "intosingle" {
+			sp.IntoSingle = val
 		}
 	}
 
@@ -493,6 +496,9 @@ func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.D
 					return nil
 				}
 				resultStat["data"] = singleResult
+				if sp.IntoSingle != "" {
+					resultStat[sp.IntoSingle] = singleResult
+				}
 			} else if isRow {
 				var rowResult map[string]interface{}
 				if err := db.Raw(sqlState).Scan(&rowResult).Error; err != nil {

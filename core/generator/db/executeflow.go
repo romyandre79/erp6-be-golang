@@ -129,7 +129,7 @@ type Component struct {
 	Outputs    map[string]IO     `json:"outputs"`    // Output ports and their connections
 	PosX       float64           `json:"pos_x"`      // X position in designer canvas
 	PosY       float64           `json:"pos_y"`      // Y position in designer canvas
-	Data       map[string]string `json:"data"`       // Additional metadata
+	Data       map[string]interface{} `json:"data"`       // Additional metadata
 	IsRun      bool              `json:"isrun"`      // Runtime flag to prevent duplicate execution
 }
 

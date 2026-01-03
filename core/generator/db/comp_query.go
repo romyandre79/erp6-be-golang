@@ -2,6 +2,7 @@ package generator
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"erp6-be-golang/core/helpers"
@@ -41,19 +42,74 @@ func handleQuery(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 	if parameter != "" {
 		// Try to parse as JSON array
 		if err := json.Unmarshal([]byte(parameter), &sqlParams); err != nil {
-			// If not JSON array, treat as single parameter ??
-			// Or maybe split by comma if it looks like a list?
-			// For now, let's treat non-JSON as single string, or empty slice if invalid
-			// But for safety, let's just use it as single scalar if it's not array
-			// However, previous components like comp_table used comma-separated keys.
-			// But here we likely want direct values from AI component or similar.
-			// Let's assume if it's not JSON, it is a single value.
-			sqlParams = []interface{}{parameter}
+			// If not JSON array, check if it's a comma-separated list
+			if strings.Contains(parameter, ",") {
+				parts := strings.Split(parameter, ",")
+				sqlParams = make([]interface{}, len(parts))
+				for i, p := range parts {
+					sqlParams[i] = strings.TrimSpace(p)
+				}
+			} else {
+				// Treat as single value
+				sqlParams = []interface{}{parameter}
+			}
+		}
+
+		// Resolve variables in parameters
+		for i, param := range sqlParams {
+			if strParam, ok := param.(string); ok {
+				resolved := strParam
+				if strings.Contains(strParam, "$") {
+					resolved = ResolveParam(c, strParam)
+					fmt.Printf("[Query Debug] Parameter '%s' resolved to '%s'\n", strParam, resolved)
+				}
+
+				// Auto-fix number format for ID/EU currency (e.g. 16.636,40 -> 16636.40, or 11,53 -> 11.53)
+				// Condition: Contains comma, check if it's likely a decimal separator (appears after any dots)
+				// Trim space first to ensure clean check
+				resolved = strings.TrimSpace(resolved)
+				
+				if strings.Contains(resolved, ",") {
+					isNumeric := true
+					for _, r := range resolved {
+						if (r < '0' || r > '9') && r != '.' && r != ',' {
+							isNumeric = false
+							fmt.Printf("[Query Debug] Normalization skipped for '%s': Found invalid char '%c'\n", resolved, r)
+							break
+						}
+					}
+
+					if isNumeric {
+						lastComma := strings.LastIndex(resolved, ",")
+						lastDot := strings.LastIndex(resolved, ".")
+						
+						// If comma is the last separator (or the only separator)
+						// e.g. 1.234,56 (comma > dot)
+						// e.g. 11,53 (dot is -1, comma > -1)
+						if lastComma > lastDot {
+							original := resolved
+							// Remove all dots (thousand separators)
+							resolved = strings.ReplaceAll(resolved, ".", "")
+							// Replace comma with dot (decimal separator)
+							resolved = strings.ReplaceAll(resolved, ",", ".")
+							fmt.Printf("[Query Debug] Auto-normalized number: '%s' -> '%s'\n", original, resolved)
+						} else {
+                            fmt.Printf("[Query Debug] Normalization skipped for '%s': Comma found but Dot is later (likely US format 1,234.56)\n", resolved)
+                        }
+					}
+				}
+				
+				sqlParams[i] = resolved
+			}
 		}
 	}
 
+	fmt.Printf("[Query Debug] Executing Query: %s with Params: %v\n", query, sqlParams)
+	fmt.Printf("[Query Debug] Component Datatype: %s\n", datatype)
+
 	switch strings.ToLower(datatype) {
 	case "node_result":
+		// ... existing node_result logic ...
 		// Just return the parameter (previous result) as the result of this node
 		// If parameter was JSON, we might want to return the parsed object?
 		// "accept output from previous result"
@@ -84,6 +140,12 @@ func handleQuery(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 		if query == "" {
 			helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA", "EMPTY QUERY")
 			return nil
+		}
+		
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(query)), "insert") || 
+		   strings.HasPrefix(strings.ToLower(strings.TrimSpace(query)), "update") ||
+		   strings.HasPrefix(strings.ToLower(strings.TrimSpace(query)), "delete") {
+			fmt.Printf("[Query Debug] WARNING: Running INSERT/UPDATE/DELETE with Method 'GET'. This may loop incorrectly or fail to commit depending on driver.\n")
 		}
 
 		var rows []map[string]interface{}
@@ -116,6 +178,8 @@ func handleQuery(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 			helpers.FailResponse(c, fiber.StatusInternalServerError, "EXEC ERROR", result.Error.Error())
 			return result.Error
 		}
+		
+		fmt.Printf("[Query Debug] Rows Affected: %d\n", result.RowsAffected)
 
 		// Try to get Last Insert ID if possible (Driver dependent)
 		var lastID int64

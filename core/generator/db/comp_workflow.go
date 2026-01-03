@@ -87,8 +87,9 @@ func handleWorkflow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, se
 		// Save parent workflow engine state and termination flag
 		parentWfEngine := c.Locals("wfEngine")
 		parentTerminated := c.Locals("flowTerminated")
+		parentComponents := c.Locals("components")
 
-		// Execute the sub-workflow (this will overwrite "wfEngine" in Locals)
+		// Execute the sub-workflow (this will overwrite "wfEngine" and "components" in Locals)
 		err := ExecuteFlow(c, db, wfName, search, flowParams)
 
 		// Capture sub-workflow results
@@ -99,8 +100,10 @@ func handleWorkflow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, se
 
 		// Restore parent workflow engine state and termination flag
 		// This ensures sub-workflow "End" node doesn't kill the parent workflow
+		// And we must restore "components" so future nodes in PARENT workflow can be found
 		c.Locals("wfEngine", parentWfEngine)
 		c.Locals("flowTerminated", parentTerminated)
+		c.Locals("components", parentComponents)
 
 		if err != nil {
 			return err
@@ -137,6 +140,15 @@ func handleWorkflow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, se
 		// This ensures WA handler can see SendMessage/Scraper nodes that executed inside the sub-workflow
 		finalWfEngine := c.Locals("wfEngine").([]WorkflowEngine)
 		finalWfEngine = append(finalWfEngine, childWfEngine...)
+		
+		// Append a result stub for THIS Workflow component
+		// InternalFlow will detect this (name="") and populate the rest (ID, success, etc.)
+		// This ensures the Workflow node returns the aggregated variables from the sub-flow
+		finalWfEngine = append(finalWfEngine, WorkflowEngine{
+			ResultNode: mergedResults,
+			// Other fields left empty for InternalFlow to fill
+		})
+
 		c.Locals("wfEngine", finalWfEngine)
 		
 		// For variable resolution (ResolveParam), having child nodes in history is sufficient.

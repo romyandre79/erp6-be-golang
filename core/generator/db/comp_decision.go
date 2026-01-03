@@ -49,6 +49,14 @@ func handleDecision(ctx *WorkflowContext) error {
 	operator := "="
 	if strings.Contains(contentDecision, "!=") {
 		operator = "!="
+	} else if strings.Contains(contentDecision, ">=") {
+		operator = ">="
+	} else if strings.Contains(contentDecision, ">") {
+		operator = ">"
+	} else if strings.Contains(contentDecision, "<=") {
+		operator = "<="
+	} else if strings.Contains(contentDecision, "<") {
+		operator = "<"
 	} else if !strings.Contains(contentDecision, "=") {
 		if enableDecision {
 			return helpers.FailResponse(ctx.FiberCtx, fiber.StatusBadRequest,
@@ -61,6 +69,8 @@ func handleDecision(ctx *WorkflowContext) error {
 	data := strings.SplitN(contentDecision, operator, 2)
 	key := strings.TrimSpace(data[0])
 	expected := strings.TrimSpace(data[1])
+	expected = strings.Trim(expected, "'")
+	expected = strings.Trim(expected, "\"")
 
 	// Get actual value based on parameter type
 	var actualValue string
@@ -107,6 +117,19 @@ func handleDecision(ctx *WorkflowContext) error {
 		return nil
 	}
 
+	// Fallback/Extension: Check wfExtras (Loop/Scheduler variables) if not found yet
+	if actualValue == "" {
+		if extras, ok := ctx.FiberCtx.Locals("wfExtras").(map[string]interface{}); ok {
+			if val, exists := extras[key]; exists {
+				if val == nil {
+					actualValue = ""
+				} else {
+					actualValue = fmt.Sprintf("%v", val)
+				}
+			}
+		}
+	}
+
 	// Debug logging
 	fmt.Printf("[Decision] Condition: %s, Key: %s, Expected: %s, Actual: '%s'\n", 
 		contentDecision, key, expected, actualValue)
@@ -115,6 +138,14 @@ func handleDecision(ctx *WorkflowContext) error {
 	match := false
 	if strings.ToLower(expected) == "empty" {
 		match = (actualValue == "")
+	} else if operator == ">" {
+		match = (actualValue > expected)
+	} else if operator == "<" {
+		match = (actualValue < expected)
+	} else if operator == ">=" {
+		match = (actualValue >= expected)
+	} else if operator == "<=" {
+		match = (actualValue <= expected)
 	} else {
 		match = (actualValue == expected)
 	}
