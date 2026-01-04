@@ -39,6 +39,7 @@ func handleScrape(ctx *WorkflowContext) error {
 		formDataJSON    string
 		submitSelector  string
 		waitTime        string
+		destinationPath string
 	)
 
 	// Extract parameters
@@ -71,14 +72,18 @@ func handleScrape(ctx *WorkflowContext) error {
 			submitSelector = val
 		case "wait_time":
 			waitTime = val
-		case "click_selector":
-			// We need a variable for this, it wasn't defined in the topvar block yet, let's just append it to new variables
-	// Wait, I can't just define it there in switch.
-	// I need to add 'clickSelector' to the var block at the top of handleScrape.
-	// But to minimize diff, I will just assume I added it or re-read Params.
-	// Actually, let's just do a clean update of the param loop.
+		case "destination_path":
+			destinationPath = val
 		}
 	}
+
+    // Checking for click_selector in a separate loop to avoid var block modification complexity in replace tool
+    var clickSelector string
+	for _, p := range ctx.Params {
+        if strings.TrimSpace(p.InputName) == "click_selector" {
+            clickSelector = strings.TrimSpace(ResolveParam(ctx.FiberCtx, p.CompValue))
+        }
+    }
 
     // Checking for click_selector in a separate loop to avoid var block modification complexity in replace tool
     var clickSelector string
@@ -271,6 +276,91 @@ func handleScrape(ctx *WorkflowContext) error {
 			html, err := scrapeWithHTTP(url, userAgent, customHeaders, "html")
 			if err == nil {
 				result, err = extractHierarchy(html.(string), extractionRules)
+			}
+		}
+
+	case "download_resource":
+		targetURL := url
+		
+		// If selector is provided, we first need to extract the URL from the page
+		if selector != "" {
+			fmt.Printf("[Scraper] Resolving URL via selector: %s\n", selector)
+			var html string
+			var pageURL string
+			
+			if method == "browser" {
+				res, err := scrapeWithBrowser(url, userAgent, "html", waitMs)
+				if err != nil {
+					return err
+				}
+				html = getHTMLFromResult(res)
+				if resMap, ok := res.(map[string]interface{}); ok {
+					if u, ok := resMap["url"].(string); ok {
+						pageURL = u
+					}
+				}
+			} else {
+				res, err := scrapeWithHTTP(url, userAgent, customHeaders, "html")
+				if err != nil {
+					return err
+				}
+				html = res.(string)
+				pageURL = url
+			}
+
+			// Extract src or href
+			doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+			if err != nil {
+				return err
+			}
+
+			sel := doc.Find(selector).First()
+			if sel.Length() == 0 {
+				return fmt.Errorf("element not found for selector: %s", selector)
+			}
+
+			if src, exists := sel.Attr("src"); exists {
+				targetURL = src
+			} else if href, exists := sel.Attr("href"); exists {
+				targetURL = href
+			} else {
+				return fmt.Errorf("element found but no src or href attribute")
+			}
+			
+			// Resolve relative URL
+			if !strings.HasPrefix(targetURL, "http") {
+               // Simple resolution for now. Proper URL resolving requires net/url
+               if strings.HasPrefix(targetURL, "//") {
+                   targetURL = "https:" + targetURL
+               } else if strings.HasPrefix(targetURL, "/") {
+                   // Need base URL
+                   // Extract scheme/host from pageURL or url
+				   // TODO: Use net/url for robust resolution
+				   // For now, simple approximation
+				   baseURL := url
+				   if pageURL != "" { baseURL = pageURL }
+				   
+				   // Strip path
+				   if parts := strings.Split(baseURL, "/"); len(parts) >= 3 {
+					   targetURL = strings.Join(parts[:3], "/") + targetURL
+				   }
+               }
+			}
+			fmt.Printf("[Scraper] Resolved Target URL: %s\n", targetURL)
+		}
+
+		if destinationPath == "" {
+			// Generate temp path if not provided
+			// But for now, require it
+			return fmt.Errorf("destination_path is required for download_resource")
+		}
+
+		err = downloadFile(targetURL, destinationPath, userAgent, customHeaders)
+		if err == nil {
+			result = map[string]string{
+				"status": "success", 
+				"file": destinationPath,
+				"url": targetURL,
 			}
 		}
 
@@ -1031,4 +1121,47 @@ func extractHierarchy(html, rulesJSON string) (interface{}, error) {
 	})
 
 	return results, nil
+}
+
+func downloadFile(url, filepath, userAgent string, headers map[string]string) error {
+	// Create the file
+	out, err := os.Create(filepath)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	// Get the data
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("User-Agent", userAgent)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	client := &http.Client{
+		Timeout: 300 * time.Second, // 5 min timeout for large files
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Check server response
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	// Writer the body to file
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

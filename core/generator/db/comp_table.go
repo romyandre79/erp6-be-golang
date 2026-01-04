@@ -182,7 +182,10 @@ func handleTable(ctx *WorkflowContext) error {
 			}
 			responseData["lastid"] = lastID
 			
+			responseData["lastid"] = lastID
+			
 			helpers.SuccessResponse(c, "DATA SAVED", responseData)
+
 		} else {
 			result := db.Table(tablename).Session(&gorm.Session{DryRun: true}).Create(newParam)
 			rawQuery := result.Statement.SQL.String()
