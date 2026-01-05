@@ -254,14 +254,25 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 			displayMessage = "⏳ Processing your request, please wait..."
 		}
 		
+		// Determine sender ID (the user currently executing the workflow)
+		var senderID int
+		if uid, ok := c.Locals("userid").(int); ok {
+			senderID = uid
+		}
+		
 		if ws.GlobalHub != nil {
 			payload, err := json.Marshal(map[string]interface{}{
 				"type":               "chat",
-				"senderid":           sendTo, // User who sent the message
-				"message":            displayMessage,
-				"title":              title,
-				"conversation_state": conversationState,
-				"executing":          executeFlag == "true",
+				"senderid":           senderID, 
+				"message":            displayMessage,    // REQUIRED by AiAssistant.vue to recognize AI message
+				"conversation_state": conversationState, // REQUIRED by AiAssistant.vue
+				"data": map[string]interface{}{
+					"senderid":           senderID,
+					"message":            displayMessage,
+					"title":              title,
+					"conversation_state": conversationState,
+					"executing":          executeFlag == "true",
+				},
 			})
 			if err == nil {
 				ws.GlobalHub.SendToUser(sendTo, payload)

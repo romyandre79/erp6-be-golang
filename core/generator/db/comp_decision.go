@@ -33,13 +33,16 @@ func handleDecision(ctx *WorkflowContext) error {
 
 	// Parse parameters
 	for _, v := range ctx.Params {
+		// Use ResolveParam so we can use variables in decision content (e.g. status=$expected_status)
+		val := ResolveParam(ctx.FiberCtx, v.CompValue)
+		
 		switch v.InputName {
 		case "decisionok":
-			contentDecision = v.CompValue
+			contentDecision = val
 		case "decisionparamtype":
-			decisionParamType = strings.ToLower(v.CompValue)
+			decisionParamType = strings.ToLower(val)
 		case "enabledecision":
-			if strings.ToLower(v.CompValue) == "false" {
+			if strings.ToLower(val) == "false" {
 				enableDecision = false
 			}
 		}

@@ -1,0 +1,25 @@
+{
+    "questions": [
+        {
+            "key": "keyword",
+            "text": "What do you want to search for? (e.g. coffee shop in Jakarta)",
+            "validation": "required",
+            "description": "Search query for Google Maps"
+        }
+    ],
+    "queries": {
+        "default": "{\"url\": \"https://www.google.com/maps/search/{{.keyword}}\", \"method\": \"browser\", \"action\": \"extract_hierarchy\", \"wait_time\": \"5000\", \"extraction_rules\": \"{\\\"root_selector\\\": \\\"div[role='feed']\\\", \\\"row_selector\\\": \\\"div[role='article']\\\", \\\"fields\\\": {\\\"name\\\": {\\\"selector\\\": \\\".qBF1Pd\\\", \\\"context\\\": \\\"row\\\", \\\"type\\\": \\\"text\\\"}, \\\"rating\\\": {\\\"selector\\\": \\\".MW4etd\\\", \\\"context\\\": \\\"row\\\", \\\"type\\\": \\\"text\\\"}, \\\"link\\\": {\\\"selector\\\": \\\"a.hfpxzc\\\", \\\"context\\\": \\\"row\\\", \\\"type\\\": \\\"attr\\\", \\\"attr\\\": \\\"href\\\"}}}\", \"detail_url\": \"$link\", \"detail_action\": \"extract_hierarchy\", \"detail_extraction_rules\": \"{\\\"root_selector\\\": \\\"body\\\", \\\"fields\\\": {\\\"address\\\": {\\\"selector\\\": \\\"button[data-item-id='address']\\\", \\\"type\\\": \\\"text\\\", \\\"context\\\": \\\"root\\\"}, \\\"phone\\\": {\\\"selector\\\": \\\"button[data-item-id^='phone:tel:']\\\", \\\"type\\\": \\\"text\\\", \\\"context\\\": \\\"root\\\"}, \\\"website\\\": {\\\"selector\\\": \\\"a[data-item-id='authority']\\\", \\\"type\\\": \\\"attr\\\", \\\"attr\\\": \\\"href\\\", \\\"context\\\": \\\"root\\\"}, \\\"photo\\\": {\\\"selector\\\": \\\"button.aoRNLd img\\\", \\\"type\\\": \\\"attr\\\", \\\"attr\\\": \\\"src\\\", \\\"context\\\": \\\"root\\\"}, \\\"menu_link\\\": {\\\"selector\\\": \\\"a[data-item-id='menu']\\\", \\\"type\\\": \\\"attr\\\", \\\"attr\\\": \\\"href\\\", \\\"context\\\": \\\"root\\\"}, \\\"reviews_text\\\": {\\\"selector\\\": \\\"button[aria-label*='ulasan' i], button[aria-label*='reviews' i]\\\", \\\"type\\\": \\\"text\\\", \\\"context\\\": \\\"root\\\"}}}\"}"
+    },
+    "params": [],
+    "defaults": {
+        "keyword": "coffee shop in Jakarta"
+    },
+    "description": "Scrape Google Maps",
+    "meta_action": "google_maps",
+    "success_message": "Searching Google Maps for {{.keyword}}...",
+    "triggers": [
+        "google maps",
+        "maps",
+        "gmaps"
+    ]
+}

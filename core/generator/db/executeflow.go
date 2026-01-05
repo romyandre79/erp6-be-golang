@@ -767,21 +767,23 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool, params
 	if !search {
 		// Check if we're in a nested workflow (called from Workflow component)
 		isNested, _ := c.Locals("nestedWorkflow").(bool)
+		
+		// Ensure raw DB is available in Locals for components like comp_table (skipTransaction)
+		if !isNested && c.Locals("db") == nil {
+			c.Locals("db", db)
+		}
 
 		if isNested {
 			// Nested workflow - reuse the existing transaction
 			tx = db
-			fmt.Printf("[ExecuteFlow] Reusing existing transaction for nested workflow\n")
 		} else {
 			// Top-level workflow - start new transaction
 			tx = db.Begin()
 			defer func() {
 				if r := recover(); r != nil {
 					tx.Rollback()
-					fmt.Printf("Transaction panic: %v\n", r)
 				}
 			}()
-			fmt.Printf("[ExecuteFlow] Started new transaction\n")
 		}
 	} else {
 		tx = db
@@ -807,10 +809,8 @@ func ExecuteFlow(c *fiber.Ctx, db *gorm.DB, flowName string, search bool, params
 			if err := tx.Commit().Error; err != nil {
 				return fmt.Errorf("commit failed: %w", err)
 			}
-			fmt.Printf("[ExecuteFlow] Transaction committed\n")
 		} else {
 			// Nested workflow - don't commit, let parent handle it
-			fmt.Printf("[ExecuteFlow] Skipping commit for nested workflow\n")
 		}
 	}
 
@@ -931,4 +931,13 @@ func resolveVariable(c *fiber.Ctx, key string) string {
 
 	// Return original key if not found
 	return "$" + key
+}
+
+// GetRawDBConnection retrieves the raw GORM connection from context locals.
+// This allows components to bypass the active transaction if needed (e.g., for logging).
+func GetRawDBConnection(c *fiber.Ctx) (*gorm.DB, error) {
+	if db, ok := c.Locals("db").(*gorm.DB); ok {
+		return db, nil
+	}
+	return nil, fmt.Errorf("raw db connection not found in context")
 }

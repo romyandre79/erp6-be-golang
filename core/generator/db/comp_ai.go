@@ -107,6 +107,19 @@ func handleAI(ctx *WorkflowContext) error {
 		return err
 	}
 
+	// Inject results into Extras for subsequent components
+	if ctx.Extras != nil {
+		for k, v := range result {
+			ctx.Extras[k] = v
+		}
+	} else {
+		// Initialize if nil (though usually initialized by engine)
+		ctx.Extras = make(map[string]interface{})
+		for k, v := range result {
+			ctx.Extras[k] = v
+		}
+	}
+
 	// Append result to workflow engine
 	wm := WorkflowEngine{
 		ResultNode: result,
@@ -180,7 +193,26 @@ func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *Workflow
 					params[key] = value
 				}
 			}
-			return ExecuteFlow(ctx.FiberCtx, db, workflowName, false, params)
+			
+			// Save PARENT state to prevent pollution by Child
+			parentWfEngine := ctx.FiberCtx.Locals("wfEngine")
+			parentComponents := ctx.FiberCtx.Locals("components")
+			parentTerminated := ctx.FiberCtx.Locals("flowTerminated")
+			parentNested := ctx.FiberCtx.Locals("nestedWorkflow")
+			
+			// Set Nested Mode for Child
+			ctx.FiberCtx.Locals("nestedWorkflow", true)
+			
+			fmt.Printf("[ExecuteAIResult] Running sub-workflow '%s' (Nested=true)\n", workflowName)
+			err := ExecuteFlow(ctx.FiberCtx, db, workflowName, false, params)
+			
+			// Restore PARENT state
+			ctx.FiberCtx.Locals("wfEngine", parentWfEngine)
+			ctx.FiberCtx.Locals("components", parentComponents)
+			ctx.FiberCtx.Locals("flowTerminated", parentTerminated)
+			ctx.FiberCtx.Locals("nestedWorkflow", parentNested)
+			
+			return err
 		}
 	}
 	

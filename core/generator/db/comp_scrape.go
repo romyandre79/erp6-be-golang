@@ -85,13 +85,7 @@ func handleScrape(ctx *WorkflowContext) error {
         }
     }
 
-    // Checking for click_selector in a separate loop to avoid var block modification complexity in replace tool
-    var clickSelector string
-	for _, p := range ctx.Params {
-        if strings.TrimSpace(p.InputName) == "click_selector" {
-            clickSelector = strings.TrimSpace(ResolveParam(ctx.FiberCtx, p.CompValue))
-        }
-    }
+
 
 	// Default user agent
 	if userAgent == "" {

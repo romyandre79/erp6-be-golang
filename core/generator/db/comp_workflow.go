@@ -80,14 +80,14 @@ func handleWorkflow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, se
 
 		fmt.Printf("[Workflow] Executing workflow: '%s' with params: %+v\n", wfName, flowParams)
 		
-		// Set flag to indicate nested workflow execution
-		c.Locals("nestedWorkflow", true)
-		
-
 		// Save parent workflow engine state and termination flag
 		parentWfEngine := c.Locals("wfEngine")
 		parentTerminated := c.Locals("flowTerminated")
 		parentComponents := c.Locals("components")
+		parentNested := c.Locals("nestedWorkflow") // Save previous nested state
+
+		// Set flag to indicate nested workflow execution
+		c.Locals("nestedWorkflow", true)
 
 		// Execute the sub-workflow (this will overwrite "wfEngine" and "components" in Locals)
 		err := ExecuteFlow(c, db, wfName, search, flowParams)
@@ -104,6 +104,7 @@ func handleWorkflow(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB, se
 		c.Locals("wfEngine", parentWfEngine)
 		c.Locals("flowTerminated", parentTerminated)
 		c.Locals("components", parentComponents)
+		c.Locals("nestedWorkflow", parentNested) // RESTORE nested state so parent knows it's the root
 
 		if err != nil {
 			return err

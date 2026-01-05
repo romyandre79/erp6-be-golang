@@ -112,7 +112,7 @@ func main() {
 	}
 
 	// Initialize WA DB for AI
-	generator.SetWADatabase(db)
+	/*generator.SetWADatabase(db)
 	
 	// Start WA Client immediately
 	go func() {
@@ -139,7 +139,7 @@ func main() {
 		}()
 	} else {
 		log.Println("Telegram bot token NOT configured in .env (TELEGRAM_BOT_TOKEN is empty)")
-	}
+	}*/
 
 
 	// Load Cache from .env

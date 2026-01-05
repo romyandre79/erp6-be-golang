@@ -22,10 +22,11 @@ func handleTable(ctx *WorkflowContext) error {
 	db := ctx.DB
 	
 	var (
-		param     string
-		tablename string
-		method    string
-		enable    = true
+		param           string
+		tablename       string
+		method          string
+		enable          = true
+		skipTransaction = false
 	)
 
 	for _, p := range params {
@@ -40,8 +41,22 @@ func handleTable(ctx *WorkflowContext) error {
 			if p.CompValue == "false" {
 				enable = false
 			}
+		case "skip_transaction", "skiptransaction":
+			if strings.ToLower(p.CompValue) == "true" {
+				skipTransaction = true
+			}
 		}
 	}
+
+	// ... (parameter parsing logic remains same, skipping lines 46-126 in replacement for brevity if tools allow, but here I must match context)
+	// Actually, I can just replace the top block and the DB selection block. 
+	// But `replace_file_content` needs contiguous block. 
+	// I'll replace the top var block first.
+	// Wait, I need to do this in one go or multiple steps. 
+	// The file size is small enough.
+	
+	// Let's do the VAR block first.
+
 
 	// parse params respecting quotes
 	var listOldParam []string
@@ -96,54 +111,76 @@ func handleTable(ctx *WorkflowContext) error {
 			}
 
 			if strings.Contains(valRaw, "$") {
-				lookupKey := strings.ReplaceAll(valRaw, "$", "")
-				var val string
+				// Use standardized ResolveParam to handle all sources (Extras, Locals, Query, NodeResults)
+				val := ResolveParam(c, valRaw)
+				fmt.Printf("[CompTable] Resolved variable '%s' to '%s'\n", valRaw, val)
 				
-				fmt.Printf("[CompTable] Attempting to resolve variable: '%s' (key: '%s')\n", valRaw, lookupKey)
-
-				// Priority 1: Check Extras from previous workflow nodes or conversation state
-				if ctx.Extras != nil {
-					if extraVal, exists := ctx.Extras[lookupKey]; exists {
-						val = fmt.Sprint(extraVal)
-						fmt.Printf("[CompTable] Found in Extras: %s\n", val)
-					}
+				// Keep fallback logic if ResolveParam returns the variable name itself (meaning not found)
+				// modifying params only if resolved
+				if val != valRaw {
+					newParam[parts[0]] = val
+				} else {
+					// Check if we wanted to force empty string for unresolved vars?
+					// Old logic printed "Failed to resolve... using empty string" but seemingly used newParam[parts[0]] = "" implicitly via zero value?
+					// Actually old logic: `var val string` (empty) -> if not found -> val remains "" -> `newParam[parts[0]] = val`
+					// ResolveParam returns "$varname" if not found.
+					// So we should handle that.
+					fmt.Printf("[CompTable] Failed to resolve '%s', utilizing default empty string\n", valRaw)
+					newParam[parts[0]] = ""
 				}
-				
-				// Priority 2: Check Locals (JWT token data)
-				if val == "" {
-					if lookupKey == "userid" {
-						if userID, ok := c.Locals("userid").(int); ok && userID != 0 {
-							val = fmt.Sprint(userID)
-						}
-					} else if lookupKey == "username" {
-						if username, ok := c.Locals("username").(string); ok && username != "" {
-							val = username
-						}
-					}
-				}
-				
-				// Priority 3: Check Query and FormValue
-				if val == "" {
-					val = c.Query(lookupKey)
-					if val == "" {
-						val = c.FormValue(lookupKey)
-					}
-				}
-				
-				if val == "" {
-					fmt.Printf("[CompTable] Failed to resolve '%s', using empty string\n", lookupKey)
-				}
-				
-				newParam[parts[0]] = val
 			} else {
 				newParam[parts[0]] = valRaw
 			}
 		} else {
+			// Standalone key (e.g. "modulename")
+			// Priority 1: Check POST/Form data
 			if val, ok := postData[key]; ok {
 				newParam[key] = val
 			} else {
-				newParam[key] = 1
+				// Priority 2: Try to auto-resolve as variable (e.g. $modulename)
+				// This fixes the issue where "modulename" became 1 because it wasn't explicitly "$modulename"
+				resolved := ResolveParam(c, "$"+key)
+				
+				// ResolveParam returns the input ("$key") if not found
+				if resolved != "$"+key {
+					newParam[key] = resolved
+					fmt.Printf("[CompTable] Auto-resolved standalone key '%s' to '%s'\n", key, resolved)
+				} else {
+					// Fallback to 1 if not found anywhere (legacy behavior)
+					newParam[key] = 1
+				}
 			}
+		}
+	}
+
+	// mulai proses SQL dinamis
+	// Determine which DB connection to use (Transaction vs Raw)
+	if skipTransaction {
+		if c != nil {
+			if rawDB, ok := c.Locals("db").(*gorm.DB); ok {
+				db = rawDB
+				fmt.Println("[CompTable] bypassing transaction (skip_transaction=true)")
+			} else {
+				fmt.Println("[CompTable] Warning: skip_transaction=true but raw DB not found in Locals, using default (transactional)")
+			}
+		}
+	}
+
+	// mulai proses SQL dinamis
+	// Insert
+	if strings.HasPrefix(strings.ToLower(method), "insert") {
+		// Use raw DB (no transaction) if skipTransaction is requested
+		useDB := db
+		if skipTransaction {
+			if rawDB, err := GetRawDBConnection(ctx.FiberCtx); err == nil {
+				useDB = rawDB
+				fmt.Println("Using Raw DB connection for INSERT (skipping workflow transaction)")
+			}
+		}
+
+		result := useDB.Table(tablename).Create(newParam)
+		if result.Error != nil {
+			return result.Error
 		}
 	}
 
@@ -151,11 +188,17 @@ func handleTable(ctx *WorkflowContext) error {
 	switch method {
 	case "insert":
 		if enable {
+			fmt.Printf("[CompTable] Executing INSERT on table '%s' (SkipTransaction: %v)\n", tablename, skipTransaction)
+			fmt.Printf("[CompTable] Payload: %+v\n", newParam)
+
 			result := db.Table(tablename).Create(newParam)
 			if result.Error != nil {
+				fmt.Printf("[CompTable] INSERT FAILED: %v\n", result.Error)
 				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA CREATE", "TABLE "+tablename)
 				return result.Error
 			}
+			fmt.Printf("[CompTable] INSERT SUCCESS. RowsAffected: %d\n", result.RowsAffected)
+
 
 			var lastID int64
 			driver := GetDatabaseDriver(db)

@@ -285,6 +285,9 @@ func init() {
             "conversation_state": stateJSON, // Pass state so AI component can use it
         }
 
+		// FORCE Root Workflow: Ensure we are not inheriting "nested" state
+		ctx.FiberCtx.Locals("nestedWorkflow", false)
+
         if err := ExecuteFlow(ctx.FiberCtx, tgDB, "aicommand", false, params); err != nil {
             fmt.Printf("[Telegram] Workflow execution error: %v\n", err)
             SendTelegramMessage(chatID, fmt.Sprintf("❌ Error: %v", err))

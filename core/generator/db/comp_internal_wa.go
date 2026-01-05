@@ -356,6 +356,10 @@ func eventHandler(evt interface{}) {
 		// Note: "aicommand" is the workflow name. 
 		// Params are mostly passed via FormValue (command), but we can pass extras too if needed.
 		params := map[string]interface{}{} 
+		
+		// FORCE Root Workflow: Ensure we are not inheriting "nested" state from recycled context
+		c.Locals("nestedWorkflow", false)
+		
 		if err := ExecuteFlow(c, waDB, "aicommand", false, params); err != nil {
 			fmt.Printf("[WA Debug] Workflow execution error: %v\n", err)
 			msg = fmt.Sprintf("❌ Execution Failed: %v", err)
