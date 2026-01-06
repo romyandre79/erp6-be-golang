@@ -24,6 +24,13 @@ type AIConversationState struct {
 	CollectedData       map[string]string `json:"collected_data"`       // Data collected so far
 	IsComplete          bool              `json:"is_complete"`          // Whether conversation is complete
 	WaitingConfirmation bool              `json:"waiting_confirmation"` // Waiting for user to type 'execute'
+	History             []AIMessage       `json:"history"`              // Full conversation history
+}
+
+type AIMessage struct {
+	Role      string `json:"role"` // "user", "assistant", "system"
+	Content   string `json:"content"`
+	Timestamp int64  `json:"timestamp"`
 }
 
 // AIQuestionFlow defines the questions for each entity type and query templates
@@ -55,6 +62,13 @@ type AIEntityInfo struct {
 	Triggers    string
 }
 
+// AIConfig holds configuration for the AI service
+type AIConfig struct {
+	Token    string
+	Provider string
+	Model    string
+}
+
 func init() {
 	RegisterComponent("AIAssistant", func(ctx *WorkflowContext) error {
 		return handleAI(ctx)
@@ -66,26 +80,41 @@ func handleAI(ctx *WorkflowContext) error {
 		command           string
 		userID            string
 		conversationState string
+		// Config params
+		token    string
+		provider string
+		model    string
 	)
 
 	// Extract parameters
 	for _, p := range ctx.Params {
 		val := strings.TrimSpace(ResolveParam(ctx.FiberCtx, p.CompValue))
-		// Fallback
-		if val == "" {
-			val = ResolveParam(ctx.FiberCtx, p.InputName)
-			if strings.HasPrefix(val, "$") {
-				val = ""
-			}
-		}
-
+		
+		// Fallback for legacy params (command, user_id)
+		// Only check InputName if val is empty AND it's a legacy param that might be passed via context variable with same name
+		// For explicit config params (provider, token), we should NOT fallback to the key name.
+		
 		switch strings.ToLower(p.InputName) {
 		case "command", "message", "text", "input":
-			command = val
+			if val == "" { val = ResolveParam(ctx.FiberCtx, p.InputName) }
+			if !strings.HasPrefix(val, "$") { command = val }
+			
 		case "user_id":
-			userID = val
+			if val == "" { val = ResolveParam(ctx.FiberCtx, p.InputName) }
+			if !strings.HasPrefix(val, "$") { userID = val }
+			
 		case "conversation_state":
-			conversationState = val
+			if val == "" { val = ResolveParam(ctx.FiberCtx, p.InputName) }
+			if !strings.HasPrefix(val, "$") { conversationState = val }
+			
+		case "token", "api_key", "apikey":
+			if val != "" { token = val }
+			
+		case "provider", "llm_provider":
+			if val != "" { provider = val }
+			
+		case "model", "llm_model":
+			if val != "" { model = val }
 		}
 	}
 
@@ -102,7 +131,15 @@ func handleAI(ctx *WorkflowContext) error {
 	// Or we can get it from Config.
 	dbDriver := ctx.DB.Dialector.Name() // e.g. "mysql", "postgres"
 
-	result, err := processAI(command, conversationState, dbDriver, userID, ctx.DB)
+	aiConfig := AIConfig{
+		Token:    token,
+		Provider: provider,
+		Model:    model,
+	}
+
+	fmt.Printf("[CompAI DEBUG] Config Parsed -> Provider: '%s', Model: '%s', Token Set: %v\n", provider, model, token != "")
+
+	result, err := processAI(command, conversationState, dbDriver, userID, ctx.DB, aiConfig)
 	if err != nil {
 		return err
 	}
@@ -337,7 +374,7 @@ func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *Workflow
 	return err
 }
 
-func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[string]interface{}, error) {
+func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config AIConfig) (map[string]interface{}, error) {
 	var state AIConversationState
 
 	// Parse existing state or create new one
@@ -352,8 +389,15 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 			}
 		}
 	} else {
-		state = AIConversationState{CollectedData: make(map[string]string)}
+		state = AIConversationState{CollectedData: make(map[string]string), History: []AIMessage{}}
 	}
+	
+	// Add user message to history
+	state.History = append(state.History, AIMessage{
+		Role:      "user",
+		Content:   command,
+		Timestamp: time.Now().Unix(),
+	})
 
 	lowerCmd := strings.ToLower(command)
 
@@ -471,11 +515,187 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB) (map[st
 		}
 	}
 	
-	// Unknown
+	// Unknown command - Delegate to LLM
+	fmt.Printf("[CompAI] No strict command matched. Delegating to LLM...\n")
+	return delegateToLLM(command, state, dbDriver, userID, db, config)
+}
+
+func delegateToLLM(command string, state AIConversationState, driver, userID string, db *gorm.DB, config AIConfig) (map[string]interface{}, error) {
+	// 1. Get Schema Context
+	schemaTables, err := ReverseEngineerDatabase(db)
+	if err != nil {
+		fmt.Printf("[CompAI] Warning: Failed to get schema: %v\n", err)
+	}
+	
+	// Simplify schema for prompt
+	var schemaSummary strings.Builder
+	schemaSummary.WriteString("Database Schema:\n")
+	for _, t := range schemaTables {
+		schemaSummary.WriteString(fmt.Sprintf("- Table: %s\n", t.Name))
+		for _, c := range t.Columns {
+			schemaSummary.WriteString(fmt.Sprintf("  - %s (%s)\n", c.Name, c.Type))
+		}
+	}
+	
+	// 2. Build Prompt
+	var promptBuilder strings.Builder
+	promptBuilder.WriteString("You are a helpful database assistant for an ERP system. ")
+	promptBuilder.WriteString("You have access to the following database schema:\n")
+	promptBuilder.WriteString(schemaSummary.String())
+	promptBuilder.WriteString("\n\nAnswer the user's question. If you need to query the database, output the SQL query in valid JSON format like: {\"action\": \"query\", \"sql\": \"SELECT ...\"}. \n")
+	promptBuilder.WriteString("If you can answer without querying (or have the result), just provide the answer.\n\n")
+	
+	// Add History
+	for _, msg := range state.History {
+		role := "User"
+		if msg.Role == "assistant" { role = "Assistant" }
+		promptBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
+	}
+	promptBuilder.WriteString("Assistant:")
+	
+	fullPrompt := promptBuilder.String()
+	
+	
+	// 3. Call LLM (Using ENV for config for now, or default)
+	
+	// 3. Call LLM (Loop for Agentic behavior - max 5 turns)
+	maxTurns := 5
+	
+	// Prioritize Params -> Env
+	token := config.Token
+	if token == "" { token = os.Getenv("OPENAI_API_KEY") }
+	
+	provider := config.Provider
+	if provider == "" { provider = os.Getenv("LLM_PROVIDER") }
+	
+	model := config.Model
+	if model == "" { model = os.Getenv("LLM_MODEL") }
+	
+	// Fallback if no env
+	if token == "" {
+		return map[string]interface{}{
+			"message": "I'm sorry, I can't help with that yet (LLM Token not configured).",
+			"user_id": userID,
+		}, nil
+	}
+	
+	fmt.Printf("[CompAI DEBUG] delegateToLLM -> Provider: '%s', Model: '%s'\n", provider, model)
+	
+	var finalResponse string
+	
+	for i := 0; i < maxTurns; i++ {
+		// Re-build prompt with latest history
+		var currentPromptBuilder strings.Builder
+		currentPromptBuilder.WriteString(fullPrompt) // Base prompt
+		
+		// Add dynamic history (including tool outputs from this session)
+		// Note: state.History is the *conversation* history. 
+		// We need to handle the *internal* reasoning loop history.
+		// For simplicity, let's just append internal turns to state.History temporarily?
+		// Better: Maintain a local conversation buffer for this turn, or just rely on state.History if we commit to it.
+		// Let's commit to state.History as it allows debugging.
+		
+		// Wait, 'fullPrompt' already has the history up to start of function. 
+		// We actually need to re-generate the history part of the prompt in each loop iteration 
+		// OR just append the new messages to the prompt.
+		// Valid approach: Just re-generate prompt from state.History
+		
+		var loopPromptBuilder strings.Builder
+		loopPromptBuilder.WriteString("You are a helpful database assistant for an ERP system. ")
+		loopPromptBuilder.WriteString("You have access to the following database schema:\n")
+		loopPromptBuilder.WriteString(schemaSummary.String())
+		loopPromptBuilder.WriteString("\n\nAnswer the user's question. If you need to query the database, output the SQL query in valid JSON format like: {\"action\": \"query\", \"sql\": \"SELECT ...\"}. \n")
+		loopPromptBuilder.WriteString("If you can answer without querying (or have the result), just provide the answer.\n\n")
+		
+		for _, msg := range state.History {
+			role := "User"
+			if msg.Role == "assistant" { role = "Assistant" }
+			if msg.Role == "system" { role = "System" } // For Tool Outputs
+			loopPromptBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
+		}
+		loopPromptBuilder.WriteString("Assistant:")
+		currentPrompt := loopPromptBuilder.String()
+		
+		var err error
+		var llmResponse string
+		if strings.TrimSpace(strings.ToLower(provider)) == "gemini" {
+			llmResponse, err = RunGemini(token, model, currentPrompt, "")
+		} else {
+			llmResponse, err = RunOpenAI(token, "", model, currentPrompt)
+		}
+		
+		if err != nil {
+			return nil, fmt.Errorf("LLM Iteration %d Error: %v", i, err)
+		}
+		
+		fmt.Printf("[CompAI DEBUG] Turn %d LLM Response: %s\n", i, llmResponse)
+		
+		// Add Assistant response to history
+		state.History = append(state.History, AIMessage{
+			Role:      "assistant",
+			Content:   llmResponse,
+			Timestamp: time.Now().Unix(),
+		})
+		
+		finalResponse = llmResponse
+		
+		// Check for JSON action
+		// Sanitize markdown code blocks if present
+		cleanResponse := strings.TrimSpace(llmResponse)
+		cleanResponse = strings.ReplaceAll(cleanResponse, "```json", "")
+		cleanResponse = strings.ReplaceAll(cleanResponse, "```", "")
+		cleanResponse = strings.TrimSpace(cleanResponse)
+		
+		// Find JSON start/end just in case there is text around it
+		jsonStart := strings.Index(cleanResponse, "{")
+		jsonEnd := strings.LastIndex(cleanResponse, "}")
+		
+		if jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart {
+			possibleJSON := cleanResponse[jsonStart : jsonEnd+1]
+			
+			var action map[string]interface{}
+			if err := json.Unmarshal([]byte(possibleJSON), &action); err == nil {
+				if act, ok := action["action"].(string); ok && act == "query" {
+					sqlQuery, _ := action["sql"].(string)
+					fmt.Printf("[CompAI DEBUG] Executing SQL: %s\n", sqlQuery)
+					
+					// EXECUTE SQL
+					var queryResult []map[string]interface{}
+					if err := db.Raw(sqlQuery).Scan(&queryResult).Error; err != nil {
+						// SQL Error
+						toolOutput := fmt.Sprintf("SQL Error: %v", err)
+						state.History = append(state.History, AIMessage{
+							Role:      "system",
+							Content:   toolOutput,
+							Timestamp: time.Now().Unix(),
+						})
+						fmt.Printf("[CompAI DEBUG] Tool Output: %s\n", toolOutput)
+					} else {
+						// Success
+						resultBytes, _ := json.Marshal(queryResult)
+						toolOutput := fmt.Sprintf("Query Result: %s", string(resultBytes))
+						state.History = append(state.History, AIMessage{
+							Role:      "system",
+							Content:   toolOutput,
+							Timestamp: time.Now().Unix(),
+						})
+						fmt.Printf("[CompAI DEBUG] Tool Output (Len): %d bytes\n", len(toolOutput))
+					}
+					// Continue loop to let LLM analyze result
+					continue
+				}
+			}
+		}
+		
+		// If no action found, or not a query, we are done
+		break
+	}
+	
+	stateBytes, _ := json.Marshal(state)
 	return map[string]interface{}{
-		"execute": "false",
-		"message": "I didn't understand that command. Try 'help'.",
-		"user_id": userID,
+		"message":            finalResponse,
+		"conversation_state": string(stateBytes),
+		"user_id":            userID,
 	}, nil
 }
 
