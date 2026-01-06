@@ -38,7 +38,27 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 
 	// Extract parameters from workflow
 	for _, p := range params {
-		val := strings.TrimSpace(ResolveParam(c, p.CompValue))
+		var val string
+
+		// FIX: Prioritize workflow history for 'message' parameter to avoid FormValue override
+		// The default ResolveParam prioritizes Form/Query values (e.g. "Data Customer sent" from user input)
+		// which hides the generated table/content from previous nodes.
+		if (strings.ToLower(p.InputName) == "messagenotif" || strings.ToLower(p.InputName) == "message") && p.CompValue == "$message" {
+			if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
+				for i := len(wfEngine) - 1; i >= 0; i-- {
+					if resultMap, ok := wfEngine[i].ResultNode.(map[string]interface{}); ok {
+						if msg, ok := resultMap["message"].(string); ok && msg != "" {
+							val = msg
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if val == "" {
+			val = strings.TrimSpace(ResolveParam(c, p.CompValue))
+		}
 		switch strings.ToLower(p.InputName) {
 		case "sendtonotif", "user_id":
 			// Try to parse as int

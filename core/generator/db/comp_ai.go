@@ -562,11 +562,22 @@ func delegateToLLM(command string, state AIConversationState, driver, userID str
 	maxTurns := 5
 	
 	// Prioritize Params -> Env
-	token := config.Token
-	if token == "" { token = os.Getenv("OPENAI_API_KEY") }
-	
+	// Determine provider first, as it influences token lookup
 	provider := config.Provider
 	if provider == "" { provider = os.Getenv("LLM_PROVIDER") }
+
+	token := config.Token
+	if token == "" {
+		if strings.ToLower(provider) == "gemini" {
+			token = os.Getenv("GEMINI_API_KEY")
+		} else if strings.EqualFold(provider, "claude") || strings.EqualFold(provider, "anthropic") {
+			token = os.Getenv("ANTHROPIC_API_KEY")
+		}
+		
+		if token == "" {
+			token = os.Getenv("OPENAI_API_KEY")
+		}
+	}
 	
 	model := config.Model
 	if model == "" { model = os.Getenv("LLM_MODEL") }
@@ -616,16 +627,207 @@ func delegateToLLM(command string, state AIConversationState, driver, userID str
 		loopPromptBuilder.WriteString("Assistant:")
 		currentPrompt := loopPromptBuilder.String()
 		
-		var err error
-		var llmResponse string
-		if strings.TrimSpace(strings.ToLower(provider)) == "gemini" {
-			llmResponse, err = RunGemini(token, model, currentPrompt, "")
-		} else {
-			llmResponse, err = RunOpenAI(token, "", model, currentPrompt)
+		// Prepare candidate providers for rotation/fallback
+		var candidates []AIConfig
+		
+		// Parse Comma-Separated Configurations - we do this manually below via split
+		
+		// If Env var was used and params were empty, respect that (already handled because we pass config.* which might be from Params)
+		// Wait, earlier logic set 'provider' var from logic: params -> env. 
+		// But here we want to re-evaluate based on the potentially raw inputs or just use the vars passed in?
+		// The `config` struct passed to delegateToLLM contains the raw values from ctx.Params (or defaults if we logic'd them?)
+		// Actually processAI receives `config AIConfig` which is constructed in handleAI directly from params.
+		// So `config.Provider` is exactly what came from params. 
+		// BUT, if params were empty, we want to start with the ENV var value.
+		
+		// Let's re-resolve the "Main" strings to iterate on.
+		pStr := config.Provider
+		if pStr == "" { pStr = os.Getenv("LLM_PROVIDER") }
+		
+		tStr := config.Token
+		// If token param is empty, we don't automatically grab one single ENNV because it depends on the provider list.
+		// But if they provided a single provider in env and no token param, we might want to grab the matching env key.
+		// We'll handle "missing token" inside the loop by looking up ENV.
+		
+		mStr := config.Model
+		if mStr == "" { mStr = os.Getenv("LLM_MODEL") }
+		
+		pParts := strings.Split(pStr, ",")
+		tParts := strings.Split(tStr, ",")
+		mParts := strings.Split(mStr, ",")
+		
+		trim := func(s []string) []string {
+			var r []string
+			for _, v := range s {
+				if t := strings.TrimSpace(v); t != "" {
+					r = append(r, t)
+				}
+			}
+			return r
+		}
+		pParts = trim(pParts)
+		// Don't trim empty tokens entirely? Well, "key1,,key3" -> middle one empty? 
+		// strings.Split gives empty strings. The trim function above removes them. 
+		// If user did "gemini,openai" and "key1," (missing second), we want to detect that.
+		// Let's just create a safe accessor.
+		
+		// Helper to safely get item from slice or empty
+		getAt := func(slice []string, i int) string {
+			if i < len(slice) { return strings.TrimSpace(slice[i]) }
+			return ""
 		}
 		
-		if err != nil {
-			return nil, fmt.Errorf("LLM Iteration %d Error: %v", i, err)
+		seenCandidates := make(map[string]bool) // Key: Provider+Model+Token
+		
+		// Helper to get models for a provider, placing the preferred ones first
+		getModels := func(prov, preferredModelsStr string) []string {
+			p := strings.ToLower(prov)
+			var defaults []string
+			if p == "gemini" {
+				defaults = []string{"gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"}
+			} else if p == "openai" {
+				defaults = []string{"gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"}
+			} else if p == "claude" || p == "anthropic" {
+				defaults = []string{"claude-3-5-sonnet-20240620", "claude-3-opus-20240229", "claude-3-haiku-20240307"}
+			}
+			
+			var final []string
+			seen := make(map[string]bool)
+			
+			// Parse user provided list
+			if preferredModelsStr != "" {
+				parts := strings.Split(preferredModelsStr, ",")
+				for _, part := range parts {
+					m := strings.TrimSpace(part)
+					if m != "" && !seen[m] {
+						final = append(final, m)
+						seen[m] = true
+					}
+				}
+			}
+			
+			// Append defaults if not seen
+			for _, m := range defaults {
+				if !seen[m] {
+					final = append(final, m)
+					seen[m] = true
+				}
+			}
+			return final
+		}
+		
+		// 1. Build candidates from explicit lists
+		for i, rawProv := range pParts {
+			provName := strings.ToLower(rawProv)
+			
+			// Get corresponding token
+			userToken := getAt(tParts, i)
+			
+			// Resolve Token if empty mechanism
+			if userToken == "" {
+				if provName == "gemini" { userToken = os.Getenv("GEMINI_API_KEY") }
+				if provName == "openai" { userToken = os.Getenv("OPENAI_API_KEY") }
+				if provName == "claude" || provName == "anthropic" { userToken = os.Getenv("ANTHROPIC_API_KEY") }
+			}
+			
+			if userToken == "" {
+				fmt.Printf("[CompAI DEBUG] Skipping provider '%s' (index %d): No token found\n", provName, i)
+				continue
+			}
+
+			// Resolve Models
+			// Logic: Comma separates PROVIDER-level chunks. Colon separates MODELS within a chunk.
+			// Example: Provider="gemini,openai" Model="gem1.5:gem1.0, gpt4"
+			
+			targetModelStr := ""
+			
+			if len(pParts) == 1 {
+				// Single Provider: Treat entire model string as the list for this provider
+				// Allow both comma and colon as separators
+				targetModelStr = strings.ReplaceAll(mStr, ":", ",")
+			} else {
+				// Multi Provider: Get the chunk corresponding to this provider index
+				modelChunk := getAt(mParts, i)
+				
+				// Handle mismatched lengths (e.g. 2 providers, 1 model string)
+				// If missing, try to use the last available chunk or default
+				if modelChunk == "" && len(mParts) > 0 {
+					modelChunk = getAt(mParts, len(mParts)-1)
+				}
+				
+				// Convert inner colon separators to commas for getModels
+				targetModelStr = strings.ReplaceAll(modelChunk, ":", ",")
+			}
+			
+			models := getModels(provName, targetModelStr)
+			for _, m := range models {
+				key := provName + "|" + m + "|" + userToken
+				if !seenCandidates[key] {
+					candidates = append(candidates, AIConfig{Token: userToken, Provider: provName, Model: m})
+					seenCandidates[key] = true
+				}
+			}
+		}
+
+		// 2. Auto-Discover Fallbacks (Env) if not already explicitly added
+		// (This covers the case where user didn't even put them in the list)
+		
+		addFallback := func(pName, envKey string) {
+			token := os.Getenv(envKey)
+			if token == "" { return }
+			
+			// Check if we already have this provider coverage? 
+			// Maybe checking "gemini" presence in pParts is enough?
+			// But user might have "gemini" in pParts but with a specific token. We might want to add Env-based Gemini as backup?
+			// Let's just add it. Duplication check via `seenCandidates` handles duplicates (same token/model). 
+			// If token is different (Env vs Param), it's a valid new candidate!
+			
+			models := getModels(pName, "")
+			// Limit fallbacks to 2 to not spam
+			if len(models) > 2 { models = models[:2] }
+			
+			for _, m := range models {
+				key := pName + "|" + m + "|" + token
+				if !seenCandidates[key] {
+					candidates = append(candidates, AIConfig{Token: token, Provider: pName, Model: m})
+					seenCandidates[key] = true
+				}
+			}
+		}
+		
+		addFallback("gemini", "GEMINI_API_KEY")
+		addFallback("openai", "OPENAI_API_KEY")
+		addFallback("claude", "ANTHROPIC_API_KEY")
+
+		var err error
+		var llmResponse string
+		var lastError error
+		success := false
+		
+		// Try each candidate
+		for idx, cand := range candidates {
+			pName := strings.TrimSpace(strings.ToLower(cand.Provider))
+			fmt.Printf("[CompAI DEBUG] Attempt %d using %s (Model: %s)\n", idx+1, pName, cand.Model)
+			
+			if pName == "gemini" {
+				llmResponse, err = RunGemini(cand.Token, cand.Model, currentPrompt, "")
+			} else if pName == "claude" || pName == "anthropic" {
+				llmResponse, err = RunAnthropic(cand.Token, cand.Model, currentPrompt, "")
+			} else {
+				llmResponse, err = RunOpenAI(cand.Token, "", cand.Model, currentPrompt)
+			}
+			
+			if err == nil {
+				success = true
+				break // Success!
+			} else {
+				fmt.Printf("[CompAI DEBUG] Attempt %d failed: %v\n", idx+1, err)
+				lastError = err
+			}
+		}
+		
+		if !success {
+			return nil, fmt.Errorf("All LLM providers failed. Last error: %v", lastError)
 		}
 		
 		fmt.Printf("[CompAI DEBUG] Turn %d LLM Response: %s\n", i, llmResponse)

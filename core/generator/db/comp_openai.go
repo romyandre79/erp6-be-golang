@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/liushuangls/go-anthropic/v2"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
@@ -72,6 +73,8 @@ func handleOpenAI(ctx *WorkflowContext) error {
 	switch strings.ToLower(provider) {
 	case "gemini":
 		result, err = RunGemini(token, model, userPrompt, baseURL)
+	case "claude", "anthropic":
+		result, err = RunAnthropic(token, model, userPrompt, baseURL)
 	default:
 		// Default to OpenAI
 		if model == "" {
@@ -159,4 +162,29 @@ func RunGemini(token, model, userPrompt, baseURL string) (string, error) {
 	}
 
 	return result.Text(), nil
+}
+
+func RunAnthropic(token, model, userPrompt, baseURL string) (string, error) {
+	if model == "" {
+		model = "claude-3-5-sonnet-20240620"
+	}
+
+	client := anthropic.NewClient(token)
+	
+	resp, err := client.CreateMessages(context.Background(), anthropic.MessagesRequest{
+		Model: anthropic.Model(model),
+		Messages: []anthropic.Message{
+			anthropic.NewUserTextMessage(userPrompt),
+		},
+		MaxTokens: 1024,
+	})
+	
+	if err != nil {
+		return "", fmt.Errorf("Anthropic API error: %v", err)
+	}
+	
+	if len(resp.Content) > 0 {
+		return *resp.Content[0].Text, nil
+	}
+	return "", fmt.Errorf("no content in response")
 }
