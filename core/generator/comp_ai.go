@@ -503,8 +503,36 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config 
 		}
 	}
 
+	
 	// Unknown command - Delegate to LLM
 	fmt.Printf("[CompAI] No strict command matched. Delegating to LLM...\n")
+	
+	// Auto-detect if question is about documents
+	if !useAllDocuments && documentIDs == "" {
+		lowerCmd := strings.ToLower(command)
+		documentKeywords := []string{
+			"document", "manual", "file", "pdf", "docx", "uploaded", 
+			"user manual", "panduan", "dokumen", "petunjuk",
+			"akun", "jenis", "master", "cara", "how to", "bagaimana",
+			"check", "cek", "lihat", "baca", "read",
+			"jelaskan", "menggunakan", "gunakan", "pakai",
+		}
+		
+		fmt.Printf("[CompAI] Checking command for document keywords: '%s'\n", lowerCmd)
+		
+		for _, keyword := range documentKeywords {
+			if strings.Contains(lowerCmd, keyword) {
+				fmt.Printf("[CompAI] ✓ Detected document-related question (keyword: '%s'), auto-loading all documents\n", keyword)
+				useAllDocuments = true
+				break
+			}
+		}
+		
+		if !useAllDocuments {
+			fmt.Printf("[CompAI] ✗ No document keywords detected, will use database only\n")
+		}
+	}
+	
 	return delegateToLLM(command, state, dbDriver, userID, db, config, documentIDs, useAllDocuments)
 }
 
@@ -553,6 +581,24 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 		} else if len(documents) > 0 {
 			documentContext.WriteString("\n\nAvailable Documents:\n")
 			for _, doc := range documents {
+				fmt.Printf("[CompAI] Loading document ID %d: %s (Type: %s, Size: %d bytes, Text length: %d chars)\n", 
+					doc.DocumentID, doc.FileName, doc.FileType, doc.FileSize, len(doc.ExtractedText))
+				
+				// Show preview of extracted text for debugging
+				preview := doc.ExtractedText
+				if len(preview) > 100 {
+					preview = preview[:100] + "..."
+				}
+				fmt.Printf("[CompAI] Document preview: %s\n", preview)
+				
+				// Show FULL text for debugging (first 1000 chars)
+				fullTextPreview := doc.ExtractedText
+				if len(fullTextPreview) > 1000 {
+					fullTextPreview = fullTextPreview[:1000] + "... (truncated for logging)"
+				}
+				fmt.Printf("[CompAI] FULL document text being sent to AI:\n%s\n", fullTextPreview)
+				fmt.Printf("[CompAI] ==========================================\n")
+				
 				documentContext.WriteString(fmt.Sprintf("\n[Document ID: %d - %s]\n", doc.DocumentID, doc.FileName))
 				documentContext.WriteString(fmt.Sprintf("Type: %s | Size: %d bytes\n", doc.FileType, doc.FileSize))
 				documentContext.WriteString("Content:\n")
@@ -572,28 +618,60 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 
 	// 2. Build Prompt
 	var promptBuilder strings.Builder
-	promptBuilder.WriteString("You are a helpful database assistant for an ERP system. ")
-	promptBuilder.WriteString("You have access to the following database schema:\n")
-	promptBuilder.WriteString(schemaSummary.String())
 	
-	// Add document context if available
+	// If documents are loaded, prioritize them and HIDE database schema
 	if documentContext.Len() > 0 {
+		promptBuilder.WriteString("You are a document reader assistant. ")
+		promptBuilder.WriteString("Your ONLY job is to answer questions based on the documents provided below.\n\n")
+		promptBuilder.WriteString("CRITICAL RULES:\n")
+		promptBuilder.WriteString("1. You MUST answer ONLY using information from the documents below\n")
+		promptBuilder.WriteString("2. You MUST NOT use your general knowledge or training data\n")
+		promptBuilder.WriteString("3. You MUST quote or paraphrase directly from the document text\n")
+		promptBuilder.WriteString("4. If the answer is NOT in the documents, you MUST say: 'Informasi tersebut tidak ada dalam dokumen yang diunggah'\n")
+		promptBuilder.WriteString("5. DO NOT make assumptions or add information not in the documents\n")
+		promptBuilder.WriteString("6. DO NOT explain concepts beyond what is written in the documents\n\n")
 		promptBuilder.WriteString(documentContext.String())
-		promptBuilder.WriteString("\nYou can reference information from these documents when answering questions.\n")
+		promptBuilder.WriteString("\n**Your Task:**\n")
+		promptBuilder.WriteString("Read the documents above carefully and answer the user's question using ONLY the information provided in these documents.\n")
+		promptBuilder.WriteString("If you use information from the documents, reference which document it came from.\n\n")
+	} else {
+		// No documents, use database-focused prompt
+		promptBuilder.WriteString("You are a helpful database assistant for an ERP system. ")
+		promptBuilder.WriteString("You have access to the following database schema:\n")
+		promptBuilder.WriteString(schemaSummary.String())
+		promptBuilder.WriteString("\n\nAnswer the user's question. If you need to query the database, output the SQL query in valid JSON format like: {\"action\": \"query\", \"sql\": \"SELECT ...\"}. \n")
+		promptBuilder.WriteString("If you can answer without querying (or have the result), just provide the answer.\n\n")
 	}
 	
-	promptBuilder.WriteString("\n\nAnswer the user's question. If you need to query the database, output the SQL query in valid JSON format like: {\"action\": \"query\", \"sql\": \"SELECT ...\"}. \n")
-	promptBuilder.WriteString("If you can answer without querying (or have the result), just provide the answer.\n\n")
 
-	// Add History
-	for _, msg := range state.History {
-		role := "User"
-		if msg.Role == "assistant" {
-			role = "Assistant"
+	// Add History (but SKIP if documents are loaded - we want fresh document-only responses)
+	if documentContext.Len() == 0 {
+		for _, msg := range state.History {
+			role := "User"
+			if msg.Role == "assistant" {
+				role = "Assistant"
+			}
+			promptBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
 		}
-		promptBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
+		promptBuilder.WriteString("Assistant:")
+	} else {
+		// When documents are loaded, ignore conversation history and use reading comprehension format
+		fmt.Printf("[CompAI] Skipping conversation history - using document-only mode\n")
+		
+		// Add the user's question as part of the reading comprehension task
+		promptBuilder.WriteString("\n**Question to Answer:**\n")
+		promptBuilder.WriteString(command)
+		promptBuilder.WriteString("\n\n**How to Answer:**\n")
+		promptBuilder.WriteString("1. Find the relevant section in the document above\n")
+		promptBuilder.WriteString("2. Copy or paraphrase EXACTLY what the document says\n")
+		promptBuilder.WriteString("3. Do NOT add explanations, context, or information not in the document\n")
+		promptBuilder.WriteString("4. If the document doesn't contain the answer, say: 'Dokumen tidak membahas hal tersebut'\n\n")
+		promptBuilder.WriteString("**Example of CORRECT answer:**\n")
+		promptBuilder.WriteString("'Menurut dokumen, langkah-langkahnya adalah: 1. Click Accounting Menu, 2. Click Sub Menu Account Type'\n\n")
+		promptBuilder.WriteString("**Example of WRONG answer:**\n")
+		promptBuilder.WriteString("'Master Jenis Akun berfungsi sebagai kerangka untuk Bagan Akun...' (This adds information not in the document)\n\n")
+		promptBuilder.WriteString("**Your Answer (based ONLY on the document):**\n")
 	}
-	promptBuilder.WriteString("Assistant:")
 
 	fullPrompt := promptBuilder.String()
 
@@ -667,23 +745,32 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 		// Valid approach: Just re-generate prompt from state.History
 
 		var loopPromptBuilder strings.Builder
-		loopPromptBuilder.WriteString("You are a helpful database assistant for an ERP system. ")
-		loopPromptBuilder.WriteString("You have access to the following database schema:\n")
-		loopPromptBuilder.WriteString(schemaSummary.String())
-		loopPromptBuilder.WriteString("\n\nAnswer the user's question. If you need to query the database, output the SQL query in valid JSON format like: {\"action\": \"query\", \"sql\": \"SELECT ...\"}. \n")
-		loopPromptBuilder.WriteString("If you can answer without querying (or have the result), just provide the answer.\n\n")
+		
+		// CRITICAL FIX: Only rebuild with database schema if documents are NOT loaded
+		if documentContext.Len() == 0 {
+			// Database mode
+			loopPromptBuilder.WriteString("You are a helpful database assistant for an ERP system. ")
+			loopPromptBuilder.WriteString("You have access to the following database schema:\n")
+			loopPromptBuilder.WriteString(schemaSummary.String())
+			loopPromptBuilder.WriteString("\n\nAnswer the user's question. If you need to query the database, output the SQL query in valid JSON format like: {\"action\": \"query\", \"sql\": \"SELECT ...\"}. \n")
+			loopPromptBuilder.WriteString("If you can answer without querying (or have the result), just provide the answer.\n\n")
 
-		for _, msg := range state.History {
-			role := "User"
-			if msg.Role == "assistant" {
-				role = "Assistant"
+			for _, msg := range state.History {
+				role := "User"
+				if msg.Role == "assistant" {
+					role = "Assistant"
+				}
+				if msg.Role == "system" {
+					role = "System"
+				} // For Tool Outputs
+				loopPromptBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
 			}
-			if msg.Role == "system" {
-				role = "System"
-			} // For Tool Outputs
-			loopPromptBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
+			loopPromptBuilder.WriteString("Assistant:")
+		} else {
+			// Document mode - use the fullPrompt which already has document context
+			loopPromptBuilder.WriteString(fullPrompt)
 		}
-		loopPromptBuilder.WriteString("Assistant:")
+		
 		currentPrompt := loopPromptBuilder.String()
 
 		// Prepare candidate providers for rotation/fallback

@@ -15,6 +15,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/ledongthuc/pdf"
 	"github.com/nguyenthenguyen/docx"
+	"gorm.io/gorm"
 )
 
 func init() {
@@ -60,7 +61,7 @@ func handleDocument(ctx *WorkflowContext) error {
 
 	switch action {
 	case "upload_and_extract":
-		return handleUploadAndExtract(ctx, fileField, userID, maxFileSize)
+		return handleUploadAndExtract(ctx, fileField, documentID, userID, maxFileSize)
 	case "list":
 		return handleListDocuments(ctx, userID)
 	case "get":
@@ -73,13 +74,29 @@ func handleDocument(ctx *WorkflowContext) error {
 	}
 }
 
-func handleUploadAndExtract(ctx *WorkflowContext, fileField string, userID int, maxFileSize int64) error {
+func handleUploadAndExtract(ctx *WorkflowContext, fileField string, documentID string, userID int, maxFileSize int64) error {
 	c := ctx.FiberCtx
 	db := ctx.DB
 
 	if fileField == "" {
 		helpers.FailResponse(c, fiber.StatusBadRequest, "MISSING_PARAMETER", "file_field is required for upload_and_extract")
 		return fmt.Errorf("file_field parameter is required")
+	}
+
+	// Check if this is an UPDATE operation
+	isUpdate := documentID != "" && documentID != "0"
+	var existingDocument models.Document
+	
+	if isUpdate {
+		// Verify document exists and belongs to user
+		result := db.Where("documentid = ? AND userid = ?", documentID, userID).First(&existingDocument)
+		if result.Error != nil {
+			helpers.FailResponse(c, fiber.StatusNotFound, "DOCUMENT_NOT_FOUND", "Document not found or access denied")
+			return result.Error
+		}
+		fmt.Printf("[CompDocument] UPDATE mode: Replacing document ID %s\n", documentID)
+	} else {
+		fmt.Printf("[CompDocument] INSERT mode: Creating new document\n")
 	}
 
 	var fileData []byte
@@ -274,26 +291,68 @@ func handleUploadAndExtract(ctx *WorkflowContext, fileField string, userID int, 
 
 	fmt.Printf("[CompDocument] Extracted %d characters of text\n", len(extractedText))
 
-	// Store in database
+	// Store or update in database
 	webPath := strings.ReplaceAll(savePath, "\\", "/")
-	document := models.Document{
-		UserID:        userID,
-		FileName:      fileName,
-		FilePath:      webPath,
-		FileType:      fileType,
-		FileSize:      fileSize,
-		ExtractedText: extractedText,
-	}
+	
+	var result *gorm.DB
+	var document models.Document
+	
+	if isUpdate {
+		// UPDATE existing document
+		// Delete old file first
+		if existingDocument.FilePath != "" {
+			oldPath := existingDocument.FilePath
+			if err := os.Remove(oldPath); err != nil {
+				fmt.Printf("[CompDocument] Warning: Failed to delete old file %s: %v\n", oldPath, err)
+			} else {
+				fmt.Printf("[CompDocument] Deleted old file: %s\n", oldPath)
+			}
+		}
+		
+		// Update database record
+		result = db.Model(&models.Document{}).
+			Where("documentid = ? AND userid = ?", documentID, userID).
+			Updates(map[string]interface{}{
+				"filename":      fileName,
+				"filepath":      webPath,
+				"filetype":      fileType,
+				"filesize":      fileSize,
+				"extractedtext": extractedText,
+				"updatedat":     time.Now(),
+			})
+		
+		if result.Error != nil {
+			// Clean up new file if update fails
+			os.Remove(savePath)
+			helpers.FailResponse(c, fiber.StatusInternalServerError, "DATABASE_ERROR", "Failed to update document")
+			return result.Error
+		}
+		
+		// Reload document to get updated data
+		db.Where("documentid = ?", documentID).First(&document)
+		fmt.Printf("[CompDocument] Document updated with ID: %s\n", documentID)
+		
+	} else {
+		// INSERT new document
+		document = models.Document{
+			UserID:        userID,
+			FileName:      fileName,
+			FilePath:      webPath,
+			FileType:      fileType,
+			FileSize:      fileSize,
+			ExtractedText: extractedText,
+		}
 
-	result := db.Create(&document)
-	if result.Error != nil {
-		// Clean up file if database insert fails
-		os.Remove(savePath)
-		helpers.FailResponse(c, fiber.StatusInternalServerError, "DATABASE_ERROR", "Failed to save document metadata")
-		return result.Error
-	}
+		result = db.Create(&document)
+		if result.Error != nil {
+			// Clean up file if database insert fails
+			os.Remove(savePath)
+			helpers.FailResponse(c, fiber.StatusInternalServerError, "DATABASE_ERROR", "Failed to save document metadata")
+			return result.Error
+		}
 
-	fmt.Printf("[CompDocument] Document saved with ID: %d\n", document.DocumentID)
+		fmt.Printf("[CompDocument] Document created with ID: %d\n", document.DocumentID)
+	}
 
 	// Prepare response
 	responseData := map[string]interface{}{
@@ -303,6 +362,7 @@ func handleUploadAndExtract(ctx *WorkflowContext, fileField string, userID int, 
 		"file_size":      document.FileSize,
 		"extracted_text": extractedText,
 		"text_length":    len(extractedText),
+		"is_update":      isUpdate,
 	}
 
 	// Inject into context for downstream components
@@ -490,9 +550,96 @@ func extractTextFromDOCX(filePath string) (string, error) {
 	defer r.Close()
 
 	doc := r.Editable()
-	text := doc.GetContent()
+	rawContent := doc.GetContent()
 
-	return strings.TrimSpace(text), nil
+	// The GetContent() returns XML, we need to extract text from <w:t> tags
+	var textBuilder strings.Builder
+	
+	// Simple XML parsing to extract text from <w:t> tags
+	lines := strings.Split(rawContent, "<w:t")
+	for i, line := range lines {
+		if i == 0 {
+			continue // Skip first part before any <w:t> tag
+		}
+		
+		// Find the closing tag
+		endTag := strings.Index(line, "</w:t>")
+		if endTag == -1 {
+			continue
+		}
+		
+		// Find the end of opening tag
+		startContent := strings.Index(line, ">")
+		if startContent == -1 || startContent >= endTag {
+			continue
+		}
+		
+		// Extract text between tags
+		text := line[startContent+1 : endTag]
+		
+		// Decode XML entities
+		text = strings.ReplaceAll(text, "&lt;", "<")
+		text = strings.ReplaceAll(text, "&gt;", ">")
+		text = strings.ReplaceAll(text, "&amp;", "&")
+		text = strings.ReplaceAll(text, "&quot;", "\"")
+		text = strings.ReplaceAll(text, "&apos;", "'")
+		
+		textBuilder.WriteString(text)
+	}
+	
+	// Add paragraph breaks by detecting <w:p> tags
+	result := textBuilder.String()
+	
+	// Clean up: replace multiple spaces with single space
+	result = strings.Join(strings.Fields(result), " ")
+	
+	// Add some basic paragraph structure
+	paragraphs := strings.Split(rawContent, "<w:p ")
+	var finalText strings.Builder
+	
+	for i, para := range paragraphs {
+		if i == 0 {
+			continue
+		}
+		
+		// Extract text from this paragraph
+		var paraText strings.Builder
+		textParts := strings.Split(para, "<w:t")
+		
+		for j, part := range textParts {
+			if j == 0 {
+				continue
+			}
+			
+			endTag := strings.Index(part, "</w:t>")
+			if endTag == -1 {
+				continue
+			}
+			
+			startContent := strings.Index(part, ">")
+			if startContent == -1 || startContent >= endTag {
+				continue
+			}
+			
+			text := part[startContent+1 : endTag]
+			
+			// Decode XML entities
+			text = strings.ReplaceAll(text, "&lt;", "<")
+			text = strings.ReplaceAll(text, "&gt;", ">")
+			text = strings.ReplaceAll(text, "&amp;", "&")
+			text = strings.ReplaceAll(text, "&quot;", "\"")
+			text = strings.ReplaceAll(text, "&apos;", "'")
+			
+			paraText.WriteString(text)
+		}
+		
+		if paraText.Len() > 0 {
+			finalText.WriteString(paraText.String())
+			finalText.WriteString("\n")
+		}
+	}
+
+	return strings.TrimSpace(finalText.String()), nil
 }
 
 // extractTextFromDOC extracts text from legacy DOC files
