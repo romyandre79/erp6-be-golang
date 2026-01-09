@@ -6,13 +6,17 @@ require (
 	github.com/PuerkitoBio/goquery v1.11.0
 	github.com/chromedp/chromedp v0.14.2
 	github.com/dgraph-io/badger/v4 v4.8.0
+	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/goccy/go-json v0.10.5
 	github.com/godoes/gorm-oracle v1.6.18
 	github.com/gofiber/contrib/websocket v1.3.4
 	github.com/gofiber/fiber/v2 v2.52.9
 	github.com/joho/godotenv v1.5.1
+	github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80
+	github.com/liushuangls/go-anthropic/v2 v2.17.0
 	github.com/mdp/qrterminal/v3 v3.2.1
-	github.com/nicksnyder/go-i18n/v2 v2.6.0
+	github.com/nguyenthenguyen/docx v0.0.0-20230621112118-9c8e795a11db
+	github.com/openai/openai-go/v3 v3.15.0
 	github.com/redis/go-redis/v9 v9.14.1
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/shirou/gopsutil/v3 v3.24.5
@@ -20,6 +24,7 @@ require (
 	github.com/traefik/yaegi v0.16.1
 	github.com/xuri/excelize/v2 v2.10.0
 	go.mau.fi/whatsmeow v0.0.0-20251217143725-11cf47c62d32
+	google.golang.org/genai v1.40.0
 	google.golang.org/protobuf v1.36.11
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/driver/postgres v1.6.0
@@ -48,7 +53,6 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.4.0 // indirect
@@ -59,11 +63,9 @@ require (
 	github.com/google/s2a-go v0.1.8 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/liushuangls/go-anthropic/v2 v2.17.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mattn/go-sqlite3 v1.14.32 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
-	github.com/openai/openai-go/v3 v3.15.0 // indirect
 	github.com/petermattis/goid v0.0.0-20251121121749-a11dd1a45f9a // indirect
 	github.com/philhofer/fwd v1.1.3-0.20240916144458-20a13a1f6b7c // indirect
 	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
@@ -96,7 +98,6 @@ require (
 	golang.org/x/exp v0.0.0-20251209150349-8475f28825e9 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/term v0.38.0 // indirect
-	google.golang.org/genai v1.40.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
 	google.golang.org/grpc v1.66.2 // indirect
 	modernc.org/libc v1.66.10 // indirect

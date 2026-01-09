@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"erp6-be-golang/core/helpers"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/chromedp/chromedp"
 )
@@ -431,7 +432,7 @@ func handleScrape(ctx *WorkflowContext) error {
 				}
 				rows = append(rows, row)
 			}
-			messageBuilder.WriteString(formatDataAsTable(rows))
+			messageBuilder.WriteString(helpers.FormatDataAsTable(rows))
 		} else {
 			// Key-Value list
 			messageBuilder.WriteString("📄 **Result:**\n")
@@ -453,7 +454,7 @@ func handleScrape(ctx *WorkflowContext) error {
 			}
 		}
 		if len(rows) > 0 {
-			messageBuilder.WriteString(formatDataAsTable(rows))
+			messageBuilder.WriteString(helpers.FormatDataAsTable(rows))
 		}
 	} else {
 		// Fallback

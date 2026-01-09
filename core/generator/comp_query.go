@@ -157,7 +157,7 @@ func handleQuery(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB) error
 		resultStat["data"] = rows
 
 		// Add formatted message for SendMessage component
-		resultStat["message"] = formatDataAsTable(rows)
+		resultStat["message"] = helpers.FormatDataAsTable(rows)
 
 		// Setup paging meta if relevant? (Not implemented for raw query yet)
 

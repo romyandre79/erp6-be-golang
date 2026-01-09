@@ -2,7 +2,7 @@ package scheduler
 
 import (
 	"encoding/json"
-	generator "erp6-be-golang/core/generator/db"
+	generator "erp6-be-golang/core/generator"
 	"erp6-be-golang/models"
 	"fmt"
 	"log"

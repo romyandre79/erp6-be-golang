@@ -8,7 +8,6 @@ import (
 	"github.com/liushuangls/go-anthropic/v2"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/openai/openai-go/v3/responses"
 	"google.golang.org/genai"
 )
 
@@ -125,16 +124,23 @@ func RunOpenAI(token, baseURL, model, userPrompt string) (string, error) {
 
 	client := openai.NewClient(opts...)
 
-	chatCompletion, err := client.Responses.New(context.TODO(), responses.ResponseNewParams{
-		Input: responses.ResponseNewParamsInputUnion{OfString: openai.String(userPrompt)},
-		Model: model,
+	// Use Chat Completions API for compatibility with Ollama and other OpenAI-compatible endpoints
+	chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
+		Messages: []openai.ChatCompletionMessageParamUnion{
+			openai.UserMessage(userPrompt),
+		},
+		Model: openai.ChatModel(model),
 	})
 
 	if err != nil {
 		return "", fmt.Errorf("OpenAI API error: %v", err)
 	}
 
-	return chatCompletion.OutputText(), nil
+	if len(chatCompletion.Choices) > 0 {
+		return chatCompletion.Choices[0].Message.Content, nil
+	}
+
+	return "", fmt.Errorf("no response from API")
 }
 
 func RunGemini(token, model, userPrompt, baseURL string) (string, error) {

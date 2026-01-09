@@ -3,7 +3,7 @@ package main
 import (
 	"erp6-be-golang/core/cache"
 	"erp6-be-golang/core/configs"
-	generator "erp6-be-golang/core/generator/db"
+	generator "erp6-be-golang/core/generator"
 	"erp6-be-golang/core/scheduler"
 	"time"
 
@@ -112,8 +112,8 @@ func main() {
 	}
 
 	// Initialize WA DB for AI
-	/*generator.SetWADatabase(db)
-	
+	generator.SetWADatabase(db)
+
 	// Start WA Client immediately
 	go func() {
 		if err := generator.InitWhatmeow(); err != nil {
@@ -123,11 +123,11 @@ func main() {
 
 	// Initialize Telegram DB
 	generator.SetTelegramDatabase(db)
-	
+
 	// Start Telegram Bot if token is configured
 	telegramToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	log.Printf("Checking Telegram configuration... Token length: %d", len(telegramToken))
-	
+
 	if telegramToken != "" {
 		log.Println("Starting Telegram Bot...")
 		go func() {
@@ -139,8 +139,7 @@ func main() {
 		}()
 	} else {
 		log.Println("Telegram bot token NOT configured in .env (TELEGRAM_BOT_TOKEN is empty)")
-	}*/
-
+	}
 
 	// Load Cache from .env
 	_, err = cache.NewCache()

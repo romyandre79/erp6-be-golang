@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"erp6-be-golang/core/configs"
-	generator "erp6-be-golang/core/generator/db"
+	generator "erp6-be-golang/core/generator"
 	"fmt"
 	"net/http"
 	"os"

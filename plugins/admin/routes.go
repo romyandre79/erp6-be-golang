@@ -3,7 +3,7 @@ package admin
 
 import (
 	"encoding/json"
-	dbgenerator "erp6-be-golang/core/generator/db"
+	dbgenerator "erp6-be-golang/core/generator"
 	"erp6-be-golang/models"
 
 	"erp6-be-golang/core/ws"

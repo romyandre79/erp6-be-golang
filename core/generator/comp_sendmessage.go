@@ -269,10 +269,10 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 		
 		// Modify message if workflow is executing AND we don't have actual data yet
 		displayMessage := message
-		if executeFlag == "true" && (message == "" || message == "Data Customer sent" || strings.Contains(message, "processed successfully")) {
+		/*if executeFlag == "true" && (message == "" || message == "Data Customer sent" || strings.Contains(message, "processed successfully")) {
 			// Only show processing message if we don't have actual data
 			displayMessage = "⏳ Processing your request, please wait..."
-		}
+		}*/
 		
 		// Determine sender ID (the user currently executing the workflow)
 		var senderID int

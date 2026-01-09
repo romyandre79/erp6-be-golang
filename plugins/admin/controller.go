@@ -2,8 +2,7 @@ package admin
 
 import (
 	"erp6-be-golang/core/configs"
-	gendb "erp6-be-golang/core/generator/db"
-	genfile "erp6-be-golang/core/generator/file"
+	"erp6-be-golang/core/generator"
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/core/scheduler"
 	"erp6-be-golang/models"
@@ -156,7 +155,7 @@ func CreateModulesHandler(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	modelList := strings.Split(modelName, ",")
-	err = genfile.GeneratePlugin(db, pluginName, modelList)
+	err = generator.GeneratePlugin(db, pluginName, modelList)
 	if err != nil || !IsPermission {
 		return helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_PLUGIN_GENERATE", err.Error())
 	}
@@ -175,7 +174,7 @@ func GenerateTableHandler(c *fiber.Ctx, db *gorm.DB) error {
 		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_TABLE", "")
 	}
 
-	err = gendb.GenerateStructWithMeta(db, tableName)
+	err = generator.GenerateStructWithMeta(db, tableName)
 	if err != nil {
 		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_GENERAL_TABLE", err.Error())
 	}
@@ -196,7 +195,7 @@ func GenerateMultiTableHandler(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	tableList := strings.Split(tableName, ",")
-	err = gendb.GenerateStructWithMultiMeta(db, tableList)
+	err = generator.GenerateStructWithMultiMeta(db, tableList)
 	if err != nil {
 		return helpers.FailResponse(c, fiber.StatusUnauthorized, "INVALID_GENERAL_TABLE", err.Error())
 	}
@@ -223,7 +222,7 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 		c.Locals("enable_workflow_events", true)
 	}
 
-	err = gendb.ExecuteFlow(c, db, flowName, bSearch, nil)
+	err = generator.ExecuteFlow(c, db, flowName, bSearch, nil)
 	if err != nil {
 		return helpers.FailResponse(c, 401, "INVALID_FLOW", err.Error())
 	}
@@ -248,7 +247,7 @@ func ExecuteFlowHandler(c *fiber.Ctx, db *gorm.DB) error {
 }
 
 func LoadThemeHandler(c *fiber.Ctx, db *gorm.DB) error {
-	err := gendb.ExecuteFlow(c, db, "searchcombotheme", true, nil)
+	err := generator.ExecuteFlow(c, db, "searchcombotheme", true, nil)
 	if err != nil {
 		return helpers.FailResponse(c, 401, "INVALID_FLOW", err.Error())
 	}
@@ -531,26 +530,26 @@ func ExecuteTableOperationHandler(c *fiber.Ctx, db *gorm.DB) error {
 	}
 
 	// Parse table JSON
-	tableDef, err := gendb.ParseTableJSON(tableJSON)
+	tableDef, err := generator.ParseTableJSON(tableJSON)
 	if err != nil {
 		return helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_TABLE_JSON", err.Error())
 	}
 
 	var sqlStatements []string
-	var result *gendb.ExecutionResult
-	driver := gendb.GetDatabaseDriver(db)
+	var result *generator.ExecutionResult
+	driver := generator.GetDatabaseDriver(db)
 
 	// Generate SQL based on operation type
 	switch strings.ToLower(operation) {
 	case "create":
-		sql, err := gendb.GenerateCreateTableSQL(db, tableDef)
+		sql, err := generator.GenerateCreateTableSQL(db, tableDef)
 		if err != nil {
 			return helpers.FailResponse(c, fiber.StatusInternalServerError, "SQL_GENERATION_FAILED", err.Error())
 		}
 		sqlStatements = append(sqlStatements, sql)
 
 	case "alter":
-		sqls, err := gendb.GenerateAlterTableSQL(db, tableDef.Table.Name, tableDef.Table.Columns)
+		sqls, err := generator.GenerateAlterTableSQL(db, tableDef.Table.Name, tableDef.Table.Columns)
 		if err != nil {
 			return helpers.FailResponse(c, fiber.StatusInternalServerError, "SQL_GENERATION_FAILED", err.Error())
 		}
@@ -562,7 +561,7 @@ func ExecuteTableOperationHandler(c *fiber.Ctx, db *gorm.DB) error {
 		sqlStatements = sqls
 
 	case "drop":
-		sql := gendb.GenerateDropTableSQL(tableDef.Table.Name, driver)
+		sql := generator.GenerateDropTableSQL(tableDef.Table.Name, driver)
 		sqlStatements = append(sqlStatements, sql)
 
 	default:
@@ -572,7 +571,7 @@ func ExecuteTableOperationHandler(c *fiber.Ctx, db *gorm.DB) error {
 	// Execute SQL statements
 	var executionResults []map[string]interface{}
 	for _, sql := range sqlStatements {
-		result, err = gendb.ExecuteDDLStatement(db, sql)
+		result, err = generator.ExecuteDDLStatement(db, sql)
 		if err != nil {
 			log.Error(fmt.Sprintf("Failed to execute SQL for table %s: %v", tableDef.Table.Name, err))
 			return helpers.FailResponse(c, fiber.StatusInternalServerError, "SQL_EXECUTION_FAILED", fmt.Sprintf("Error: %s, SQL: %s", err.Error(), sql))

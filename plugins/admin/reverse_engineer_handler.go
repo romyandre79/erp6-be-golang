@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	generator "erp6-be-golang/core/generator/db"
+	generator "erp6-be-golang/core/generator"
 	"erp6-be-golang/models"
 
 	"github.com/gofiber/fiber/v2"
@@ -70,7 +70,7 @@ func ReverseEngineerHandler(c *fiber.Ctx, db *gorm.DB) error {
 	// Process each table
 	for i, table := range tables {
 		fmt.Printf("DEBUG: Processing extracted table: %s\n", table.Name)
-		
+
 		// Default position
 		x := startX
 		y := startY
@@ -197,14 +197,14 @@ func ReverseEngineerHandler(c *fiber.Ctx, db *gorm.DB) error {
 			}
 
 			if fromColIdx == -1 || toColIdx == -1 {
-				fmt.Printf("Warning: Skipping relation for %s.%s -> %s.%s (Column index not found)\n", 
+				fmt.Printf("Warning: Skipping relation for %s.%s -> %s.%s (Column index not found)\n",
 					table.Name, fk.ColumnName, fk.ReferencedTable, fk.ReferencedColumn)
 				continue
 			}
 
 			// Check if relation already exists
 			var existingRel models.DbobjectRelation
-			err := db.Where("fromtableid = ? AND fromcolname = ? AND totableid = ? AND tocolname = ?", 
+			err := db.Where("fromtableid = ? AND fromcolname = ? AND totableid = ? AND tocolname = ?",
 				fromTableID, fk.ColumnName, toTableID, fk.ReferencedColumn).First(&existingRel).Error
 
 			if err == gorm.ErrRecordNotFound {

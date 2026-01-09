@@ -490,14 +490,36 @@ func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.D
 
 		if sp.Enable {
 			if isSingle {
-				var singleResult string
+				// Scan into map to get all field values
+				var singleResult map[string]interface{}
 				if err := db.Raw(sqlState).Scan(&singleResult).Error; err != nil {
 					helpers.FailResponse(c, fiber.StatusNotFound, "INVALID_FLOW", err.Error())
 					return nil
 				}
-				resultStat["data"] = singleResult
-				if sp.IntoSingle != "" {
-					resultStat[sp.IntoSingle] = singleResult
+				
+				// Inject each field directly into context for flat access ($fieldname)
+				if singleResult != nil {
+					resultStat["data"] = singleResult
+					// Flatten all fields into resultStat
+					for key, value := range singleResult {
+						resultStat[key] = value
+					}
+					
+					// Also support legacy intosingle parameter
+					if sp.IntoSingle != "" {
+						// If only one field, inject its value
+						if len(singleResult) == 1 {
+							for _, value := range singleResult {
+								resultStat[sp.IntoSingle] = value
+							}
+						} else {
+							// If multiple fields, inject the whole map
+							resultStat[sp.IntoSingle] = singleResult
+						}
+					}
+				} else {
+					helpers.SuccessResponse(c, "INVALID DATA RETRIEVED", "")
+					return nil
 				}
 			} else if isRow {
 				var rowResult map[string]interface{}
@@ -534,7 +556,7 @@ func handleGenericSearch(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.D
 
 			// Add formatted message for SendMessage component
 			if rows, ok := resultStat["data"].([]map[string]interface{}); ok {
-				resultStat["message"] = formatDataAsTable(rows)
+				resultStat["message"] = helpers.FormatDataAsTable(rows)
 			}
 
 			wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultStat})

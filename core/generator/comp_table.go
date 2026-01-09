@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"erp6-be-golang/core/helpers"
@@ -100,7 +101,26 @@ func handleTable(ctx *WorkflowContext) error {
 		fmt.Println("[CompTable] No Extras available")
 	}
 
+	// DEBUG: Print raw param
+	fmt.Printf("[CompTable] Raw param string: %q\n", param)
+	fmt.Printf("[CompTable] PostData keys: %v\n", reflectKeys(postData))
+
+	// DEBUG: Print listOldParam
+	fmt.Printf("[CompTable] listOldParam: %q\n", listOldParam)
+
 	for _, key := range listOldParam {
+		fmt.Printf("[CompTable] Loop key: %q\n", key)
+		
+		// Clean key: trim spaces and quotes
+		cleanKey := strings.TrimSpace(key)
+		cleanKey = strings.Trim(cleanKey, "'\"")
+		
+		// Skip keys starting with @ (e.g. JSON-LD metadata like @id)
+		if strings.HasPrefix(cleanKey, "@") {
+			fmt.Printf("[CompTable] Skipping metadata key: %s (original: %s)\n", cleanKey, key)
+			continue
+		}
+
 		if strings.Contains(key, "=") {
 			parts := strings.SplitN(key, "=", 2)
 			valRaw := strings.TrimSpace(parts[1])
@@ -119,23 +139,24 @@ func handleTable(ctx *WorkflowContext) error {
 				// modifying params only if resolved
 				if val != valRaw {
 					newParam[parts[0]] = val
+					fmt.Printf("[CompTable] Set newParam[%q] = %v (resolved)\n", parts[0], val)
 				} else {
-					// Check if we wanted to force empty string for unresolved vars?
-					// Old logic printed "Failed to resolve... using empty string" but seemingly used newParam[parts[0]] = "" implicitly via zero value?
-					// Actually old logic: `var val string` (empty) -> if not found -> val remains "" -> `newParam[parts[0]] = val`
-					// ResolveParam returns "$varname" if not found.
-					// So we should handle that.
+					valRaw := strings.TrimSpace(parts[0])
+					val := ResolveParam(c, valRaw)
 					fmt.Printf("[CompTable] Failed to resolve '%s', utilizing default empty string\n", valRaw)
-					newParam[parts[0]] = ""
+					newParam[parts[0]] = val
+					fmt.Printf("[CompTable] Set newParam[%q] = %v (failed resolve)\n", parts[0], val)
 				}
 			} else {
 				newParam[parts[0]] = valRaw
+				fmt.Printf("[CompTable] Set newParam[%q] = %v (direct)\n", parts[0], valRaw)
 			}
 		} else {
 			// Standalone key (e.g. "modulename")
 			// Priority 1: Check POST/Form data
 			if val, ok := postData[key]; ok {
 				newParam[key] = val
+				fmt.Printf("[CompTable] Set newParam[%q] = %v (from PostData)\n", key, val)
 			} else {
 				// Priority 2: Try to auto-resolve as variable (e.g. $modulename)
 				// This fixes the issue where "modulename" became 1 because it wasn't explicitly "$modulename"
@@ -145,9 +166,11 @@ func handleTable(ctx *WorkflowContext) error {
 				if resolved != "$"+key {
 					newParam[key] = resolved
 					fmt.Printf("[CompTable] Auto-resolved standalone key '%s' to '%s'\n", key, resolved)
+					fmt.Printf("[CompTable] Set newParam[%q] = %v (autoresolved)\n", key, resolved)
 				} else {
 					// Fallback to 1 if not found anywhere (legacy behavior)
 					newParam[key] = 1
+					fmt.Printf("[CompTable] Set newParam[%q] = \"\" (default)\n", key)
 				}
 			}
 		}
@@ -167,24 +190,6 @@ func handleTable(ctx *WorkflowContext) error {
 	}
 
 	// mulai proses SQL dinamis
-	// Insert
-	if strings.HasPrefix(strings.ToLower(method), "insert") {
-		// Use raw DB (no transaction) if skipTransaction is requested
-		useDB := db
-		if skipTransaction {
-			if rawDB, err := GetRawDBConnection(ctx.FiberCtx); err == nil {
-				useDB = rawDB
-				fmt.Println("Using Raw DB connection for INSERT (skipping workflow transaction)")
-			}
-		}
-
-		result := useDB.Table(tablename).Create(newParam)
-		if result.Error != nil {
-			return result.Error
-		}
-	}
-
-	// mulai proses SQL dinamis
 	switch method {
 	case "insert":
 		if enable {
@@ -197,6 +202,7 @@ func handleTable(ctx *WorkflowContext) error {
 				helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA CREATE", "TABLE "+tablename)
 				return result.Error
 			}
+			fmt.Printf("[CompTable] INSERT SUCCESS. %v\n", result)
 			fmt.Printf("[CompTable] INSERT SUCCESS. RowsAffected: %d\n", result.RowsAffected)
 
 
@@ -226,6 +232,11 @@ func handleTable(ctx *WorkflowContext) error {
 			responseData["lastid"] = lastID
 			
 			responseData["lastid"] = lastID
+			ctx.Extras["lastid"] = lastID
+
+			wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+			wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
+			c.Locals("wfEngine", wfEngine)
 			
 			helpers.SuccessResponse(c, "DATA SAVED", responseData)
 
@@ -281,4 +292,15 @@ func handleTable(ctx *WorkflowContext) error {
 		helpers.FailResponse(c, fiber.StatusNotFound, "INVALID DATA UPDATE", "TABLE "+tablename)
 	}
 	return nil
+}
+
+func reflectKeys(m interface{}) []string {
+	keys := make([]string, 0)
+	v := reflect.ValueOf(m)
+	if v.Kind() == reflect.Map {
+		for _, k := range v.MapKeys() {
+			keys = append(keys, fmt.Sprint(k))
+		}
+	}
+	return keys
 }

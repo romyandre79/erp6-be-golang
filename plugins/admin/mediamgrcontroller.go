@@ -21,7 +21,7 @@ func NewMediaController(rootPath string) *MediaController {
 
 // 🟢 List semua file/folder
 func (m *MediaController) ListMedia(c *fiber.Ctx) error {
-	path := c.Query("path", "")
+	path := c.Query("path", "./public")
 	target := filepath.Join(m.RootPath, path)
 
 	files, err := os.ReadDir(target)
@@ -63,7 +63,7 @@ func (m *MediaController) UploadMedia(c *fiber.Ctx) error {
 	if len(files) == 0 {
 		return c.Status(400).JSON(fiber.Map{"error": "No files received"})
 	}
-	path := c.FormValue("path", "")
+	path := c.FormValue("path", "./public")
 	saveDir := filepath.Join(m.RootPath, path)
 	fmt.Printf("DEBUG: UploadMedia path='%s' root='%s' saveDir='%s' files=%d\n", path, m.RootPath, saveDir, len(files))
 	os.MkdirAll(saveDir, os.ModePerm)

@@ -2,7 +2,9 @@ package generator
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
+	helpers "erp6-be-golang/core/helpers"
 )
 
 func init() {
@@ -35,7 +37,7 @@ func handleTransform(ctx *WorkflowContext) error {
 	}
 
 	// Get parameters first to check transform type
-	var transformType, messageTemplate, keyField, valueField, separator string
+	var transformType, messageTemplate, keyField, valueField, separator, dateFormat string
 	for _, p := range ctx.Params {
 		val := strings.TrimSpace(ResolveParam(ctx.FiberCtx, p.CompValue))
 		switch strings.ToLower(p.InputName) {
@@ -49,6 +51,8 @@ func handleTransform(ctx *WorkflowContext) error {
 			valueField = val
 		case "separator":
 			separator = val
+		case "date_format":
+			dateFormat = val
 		}
 	}
 
@@ -202,6 +206,182 @@ func handleTransform(ctx *WorkflowContext) error {
 		result = map[string]interface{}{
 			"message": message,
 			"count":   maxLen,
+		}
+
+	case "format_rupiah":
+		// Format data into a message using template
+		result = make(map[string]interface{})
+		
+		// First, convert arrays to first element
+		flatData := make(map[string]string)
+		for key, value := range resultMap {
+			if arr, ok := value.([]interface{}); ok && len(arr) > 0 {
+				flatData[key] = fmt.Sprintf("%v", arr[0])
+			} else {
+				flatData[key] = fmt.Sprintf("%v", value)
+			}
+		}
+		
+		// If key_field and value_field are provided, inject them into the data
+		if keyField != "" && valueField != "" {
+			flatData[keyField] = valueField
+			fmt.Printf("[Transform] format_rupiah - Injected field: %s = %s\n", keyField, valueField)
+		}
+		
+		// Get keys for debug logging
+		availableKeys := make([]string, 0, len(flatData))
+		for k := range flatData {
+			availableKeys = append(availableKeys, k)
+		}
+		fmt.Printf("[Transform] format_rupiah - Available fields: %v\n", availableKeys)
+		fmt.Printf("[Transform] format_rupiah - Template: '%s'\n", messageTemplate)
+
+		// Replace placeholders in template and inject formatted values into context
+		message := messageTemplate
+		for key, value := range flatData {
+			// Support both {{key}} and {{ key }} formats
+			placeholder1 := fmt.Sprintf("{{%s}}", key)
+			placeholder2 := fmt.Sprintf("{{ %s }}", key)
+			
+			// Try to parse as float first (handles both int and float), then convert to int64
+			if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+				formatted := helpers.FormatRupiah(int64(floatVal))
+				message = strings.ReplaceAll(message, placeholder1, formatted)
+				message = strings.ReplaceAll(message, placeholder2, formatted)
+				
+				// Inject formatted value into context for use in subsequent nodes
+				ctx.Extras[key+"_formatted"] = formatted
+				fmt.Printf("[Transform] Injected to context: %s_formatted = %s\n", key, formatted)
+			} else {
+				// If not a number, just use the original value
+				message = strings.ReplaceAll(message, placeholder1, value)
+				message = strings.ReplaceAll(message, placeholder2, value)
+			}
+		}
+
+		fmt.Printf("[Transform] format_rupiah - Final message: '%s'\n", message)
+		result["message"] = message
+		// Also include the flat data (but skip 'message' to avoid overwriting)
+		for k, v := range flatData {
+			if k != "message" {
+				result[k] = v
+			}
+		}
+
+	case "format_thousand":
+		// Format data into a message using template
+		result = make(map[string]interface{})
+		
+		// First, convert arrays to first element
+		flatData := make(map[string]string)
+		for key, value := range resultMap {
+			if arr, ok := value.([]interface{}); ok && len(arr) > 0 {
+				flatData[key] = fmt.Sprintf("%v", arr[0])
+			} else {
+				flatData[key] = fmt.Sprintf("%v", value)
+			}
+		}
+		
+		// If key_field and value_field are provided, inject them into the data
+		if keyField != "" && valueField != "" {
+			flatData[keyField] = valueField
+			fmt.Printf("[Transform] format_thousand - Injected field: %s = %s\n", keyField, valueField)
+		}
+		
+		// Get keys for debug logging
+		availableKeys := make([]string, 0, len(flatData))
+		for k := range flatData {
+			availableKeys = append(availableKeys, k)
+		}
+		fmt.Printf("[Transform] format_thousand - Available fields: %v\n", availableKeys)
+		fmt.Printf("[Transform] format_thousand - Template: '%s'\n", messageTemplate)
+
+		// Replace placeholders in template and inject formatted values into context
+		message := messageTemplate
+		for key, value := range flatData {
+			// Support both {{key}} and {{ key }} formats
+			placeholder1 := fmt.Sprintf("{{%s}}", key)
+			placeholder2 := fmt.Sprintf("{{ %s }}", key)
+			
+			// Try to parse as float first (handles both int and float), then convert to int64
+			if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
+				formatted := helpers.FormatThousands(int64(floatVal))
+				message = strings.ReplaceAll(message, placeholder1, formatted)
+				message = strings.ReplaceAll(message, placeholder2, formatted)
+				
+				// Inject formatted value into context for use in subsequent nodes
+				ctx.Extras[key+"_formatted"] = formatted
+				fmt.Printf("[Transform] Injected to context: %s_formatted = %s\n", key, formatted)
+			} else {
+				// If not a number, just use the original value
+				message = strings.ReplaceAll(message, placeholder1, value)
+				message = strings.ReplaceAll(message, placeholder2, value)
+			}
+		}
+
+		result["message"] = message
+		// Also include the flat data (but skip 'message' to avoid overwriting)
+		for k, v := range flatData {
+			if k != "message" {
+				result[k] = v
+			}
+		}
+
+	case "format_date_indonesian":
+		// Format date to Indonesian format
+		result = make(map[string]interface{})
+		
+		// First, convert arrays to first element
+		flatData := make(map[string]string)
+		for key, value := range resultMap {
+			if arr, ok := value.([]interface{}); ok && len(arr) > 0 {
+				flatData[key] = fmt.Sprintf("%v", arr[0])
+			} else {
+				flatData[key] = fmt.Sprintf("%v", value)
+			}
+		}
+		
+		// If key_field and value_field are provided, inject them into the data
+		if keyField != "" && valueField != "" {
+			flatData[keyField] = valueField
+			fmt.Printf("[Transform] format_date_indonesian - Injected field: %s = %s\n", keyField, valueField)
+		}
+
+		// Get keys for debug logging
+		availableKeys := make([]string, 0, len(flatData))
+		for k := range flatData {
+			availableKeys = append(availableKeys, k)
+		}
+		fmt.Printf("[Transform] format_date_indonesian - Available fields: %v\n", availableKeys)
+		fmt.Printf("[Transform] format_date_indonesian - Template: '%s'\n", messageTemplate)
+
+		// Default to "long" format if not specified
+		if dateFormat == "" {
+			dateFormat = "long"
+		}
+		
+		// Replace placeholders in template and inject formatted values into context
+		message := messageTemplate
+		for key, value := range flatData {
+			// Support both {{key}} and {{ key }} formats
+			placeholder1 := fmt.Sprintf("{{%s}}", key)
+			placeholder2 := fmt.Sprintf("{{ %s }}", key)
+			
+			// Try to parse as date with specified format
+			formatted := helpers.FormatDateIndonesianWithFormat(value, dateFormat)
+			fmt.Printf("[Transform] Replacing '%s' with '%s' (from value '%s', format '%s')\n", placeholder1, formatted, value, dateFormat)
+			message = strings.ReplaceAll(message, placeholder1, formatted)
+			message = strings.ReplaceAll(message, placeholder2, formatted)
+			
+			// Inject formatted value into context for use in subsequent nodes
+			ctx.Extras[key+"_formatted"] = formatted
+			fmt.Printf("[Transform] Injected to context: %s_formatted = %s\n", key, formatted)
+		}
+
+		result["message"] = message
+		// Also include the flat data
+		for k, v := range flatData {
+			result[k] = v
 		}
 
 	default:
