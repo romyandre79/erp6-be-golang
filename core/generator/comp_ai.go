@@ -364,6 +364,13 @@ func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *Workflow
 }
 
 func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config models.AIConfig, documentIDs string, useAllDocuments bool) (map[string]interface{}, error) {
+	fmt.Printf("[CompAI] ========== processAI START ==========\n")
+	fmt.Printf("[CompAI] Command received: '%s'\n", command)
+	fmt.Printf("[CompAI] User ID: %s\n", userID)
+	fmt.Printf("[CompAI] Document IDs param: '%s'\n", documentIDs)
+	fmt.Printf("[CompAI] Use All Documents param: %v\n", useAllDocuments)
+	fmt.Printf("[CompAI] ==========================================\n")
+
 	var state models.AIConversationState
 
 	// Parse existing state or create new one
@@ -537,6 +544,13 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config 
 }
 
 func delegateToLLM(command string, state models.AIConversationState, driver, userID string, db *gorm.DB, config models.AIConfig, documentIDs string, useAllDocuments bool) (map[string]interface{}, error) {
+	fmt.Printf("[CompAI] ========== delegateToLLM START ==========\n")
+	fmt.Printf("[CompAI] User ID: %s\n", userID)
+	fmt.Printf("[CompAI] Command: %s\n", command)
+	fmt.Printf("[CompAI] Document IDs: %s\n", documentIDs)
+	fmt.Printf("[CompAI] Use All Documents: %v\n", useAllDocuments)
+	fmt.Printf("[CompAI] ==========================================\n")
+	
 	// 1. Get Schema Context
 	schemaTables, err := ReverseEngineerDatabase(db)
 	if err != nil {
@@ -560,11 +574,11 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 		var err error
 
 		if useAllDocuments {
-			// Get all documents for this user
-			err = db.Where("userid = ?", userID).Find(&documents).Error
-			fmt.Printf("[CompAI] Loading all documents for user %s\n", userID)
+			// Get all documents (shared across all users)
+			err = db.Find(&documents).Error
+			fmt.Printf("[CompAI] Loading ALL documents (shared knowledge base)\n")
 		} else {
-			// Get specific documents by IDs
+			// Get specific documents by IDs (no user filter - shared)
 			ids := strings.Split(documentIDs, ",")
 			var cleanIDs []string
 			for _, id := range ids {
@@ -572,8 +586,8 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 					cleanIDs = append(cleanIDs, trimmed)
 				}
 			}
-			err = db.Where("documentid IN (?) AND userid = ?", cleanIDs, userID).Find(&documents).Error
-			fmt.Printf("[CompAI] Loading documents with IDs: %v for user %s\n", cleanIDs, userID)
+			err = db.Where("documentid IN (?)", cleanIDs).Find(&documents).Error
+			fmt.Printf("[CompAI] Loading documents with IDs: %v (shared knowledge base)\n", cleanIDs)
 		}
 
 		if err != nil {

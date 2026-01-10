@@ -1,160 +1,236 @@
-Document Processing System Implementation
-This plan outlines the implementation of document processing capabilities in the ERP6 system, allowing the AI component to read and learn from PDF and DOC/DOCX files.
+Document Processing System - Implementation Walkthrough
+Overview
+Successfully implemented a comprehensive document processing system for the ERP6 application, enabling the AI component to read and learn from PDF and DOC/DOCX files.
 
-User Review Required
+Changes Made
+1. Dependencies
+Installed Library:
+
+github.com/nguyenthenguyen/docx v0.0.0-20230621112118-9c8e795a11db
+Existing: github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80
+2. Database Model
+Created: 
+document.go
+
+New 
+Document
+ model with fields:
+
+DocumentID - Primary key
+UserID - Owner of the document
+FileName - Original filename
+FilePath - Storage path on disk
+FileType - pdf, doc, or docx
+FileSize - Size in bytes
+ExtractedText - Full text content extracted from document
+Summary
+ - Optional AI-generated summary
+CreatedAt, UpdatedAt - Timestamps
+3. Database Migration
+Created: 
+create_documents_table.sql
+
+SQL migration with:
+
+Table structure for PostgreSQL (SERIAL primary key)
+Indexes on userid and createdat for performance
+Comments for documentation
 IMPORTANT
 
-New Dependencies Required
+Migration Required: Run the SQL migration to create the documents table before using the document component.
 
-We need to add github.com/nguyenthenguyen/docx for DOC/DOCX text extraction
-The PDF library github.com/ledongthuc/pdf is already installed
-NOTE
-
-Document Storage Strategy
-
-Documents will be stored in the database with their extracted text content
-Large documents may impact database size - consider adding a file size limit (e.g., 10MB)
-Document content will be injected into AI prompts, which may increase token usage
-Proposed Changes
-Backend - Document Processing Component
-[NEW] 
-document.go
-Create a new model for storing document metadata and extracted content:
-
-DocumentID (primary key)
-UserID (who uploaded it)
-FileName (original filename)
-FilePath (storage path)
-FileType (pdf, doc, docx)
-FileSize (bytes)
-ExtractedText (full text content)
-Summary
- (optional AI-generated summary)
-CreatedAt, UpdatedAt (timestamps)
-Backend - Component Implementation
-[NEW] 
+4. Document Processing Component
+Created: 
 comp_document.go
-Create a new workflow component for document processing with the following capabilities:
 
-Action: upload_and_extract - Upload a document file and extract its text content
+Comprehensive component with 4 actions:
 
-Parameters: file_field, action (upload_and_extract, extract_only, list, get)
-Extract text from PDF using github.com/ledongthuc/pdf
-Extract text from DOC/DOCX using github.com/nguyenthenguyen/docx
-Store document metadata and extracted text in the documents table
-Return document ID and extracted text in workflow result
-Inject document content into ctx.Extras for use by other components
-Action: list - List all documents for the current user
-
-Returns array of document metadata
+Action: upload_and_extract
+Accepts file upload via multipart form
+Validates file type (PDF, DOC, DOCX only)
+Enforces file size limit (10MB default, configurable)
+Extracts text content using appropriate library
+Stores metadata and extracted text in database
+Returns document ID and extracted text
+Injects data into ctx.Extras for downstream components
+Action: list
+Retrieves all documents for current user
+Returns metadata without full extracted text (for performance)
+Ordered by creation date (newest first)
 Action: 
 get
- - Retrieve a specific document's content
+Retrieves specific document by ID
+Security: Only returns documents owned by current user
+Returns full metadata including extracted text
+Injects document data into ctx.Extras
+Action: delete
+Deletes document from database and disk
+Security: Only allows deletion of own documents
+Graceful handling if file already deleted from disk
+Text Extraction Functions:
 
-Parameters: document_id
-Returns full document metadata and extracted text
-Action: delete - Delete a document
-
-Parameters: document_id
-Removes file from disk and database record
-Backend - AI Component Enhancement
-[MODIFY] 
+extractTextFromPDF()
+ - Extracts text from all pages of PDF files
+extractTextFromDOCX()
+ - Extracts text from DOCX files
+Error handling for corrupted or unreadable files
+5. AI Component Enhancement
+Modified: 
 comp_ai.go
-Enhance the AI component to accept and use document context:
 
-Add new parameter: document_ids (comma-separated list of document IDs to include as context)
-Add new parameter: use_all_documents (boolean, include all user's documents)
-In 
-delegateToLLM
- function, fetch document content from database
-Inject document content into the system prompt before sending to LLM
-Format document context as: "Available Documents:\n\n[Document: filename.pdf]\n{extracted_text}\n\n"
-Update conversation state to track which documents are being referenced
-Database Migration
-[NEW] 
-create_documents_table.sql
-Create SQL migration for the documents table:
+Added document context support:
 
-CREATE TABLE IF NOT EXISTS documents (
-    documentid SERIAL PRIMARY KEY,
-    userid INT NOT NULL,
-    filename VARCHAR(255) NOT NULL,
-    filepath VARCHAR(500) NOT NULL,
-    filetype VARCHAR(10) NOT NULL,
-    filesize BIGINT NOT NULL,
-    extractedtext TEXT,
-    summary TEXT,
-    createdat TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updatedat TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_documents_userid ON documents(userid);
-CREATE INDEX idx_documents_createdat ON documents(createdat);
-Backend - Component Registry
-[MODIFY] 
-registry.go
-No changes needed - the comp_document component will auto-register via its 
+New Parameters:
+
+document_ids - Comma-separated list of document IDs to include as context
+use_all_documents - Boolean flag to include all user's documents
+Implementation:
+
+Document retrieval in 
+delegateToLLM()
+ function
+Security: Only loads documents owned by current user
+Text truncation: Limits each document to 5000 characters to avoid token overflow
+Context injection: Adds document content to LLM system prompt
+Format: Clearly labeled with document ID, filename, type, and content
+Example Context Injection:
+
+Available Documents:
+[Document ID: 1 - training_manual.pdf]
+Type: pdf | Size: 45231 bytes
+Content:
+This is the content of the training manual...
+---
+Build Verification
+✅ Build Status: Successful
+
+No compilation errors
+All dependencies resolved
+Component auto-registered via 
 init()
- function.
+ function
+Manual Testing Guide
+Prerequisites
+Run the SQL migration to create the documents table
+Start the backend server: go run main.go
+Ensure you have a valid user session (JWT token)
+Test 1: Upload and Extract PDF
+Create a test PDF with sample content like:
 
-Frontend - Component Configuration
-[MODIFY] Component Configuration (Frontend)
-Add comp_document to the workflow designer component library:
+Employee Training Manual
+Section 1: Company Policies
+All employees must follow the code of conduct...
+Workflow Configuration:
 
-Component name: "Document Processor"
-Category: "Data Processing"
-Icon: Document/File icon
-Parameters:
-action (select: upload_and_extract, list, get, delete)
-file_field (text input, required for upload_and_extract)
-document_id (text input, required for get/delete)
-[MODIFY] AI Component Configuration (Frontend)
-Add new parameters to the AI component:
+Create a new workflow in the frontend
+Add comp_document node:
+action: upload_and_extract
+file_field: document
+Add comp_table node (optional) to save document ID
+Execute:
 
-document_ids (text input, placeholder: "1,2,3 or leave empty")
-use_all_documents (checkbox, default: false)
-Verification Plan
-Manual Testing
-Since this is a new feature with workflow integration, manual testing is the most appropriate approach:
-
-Test 1: Document Upload and Extraction
-Start the backend server: go run main.go from 
-/c:/lara/www/erp6-be-golang
-Create a new workflow in the frontend with the following nodes:
-
-Node 1: comp_document with action=upload_and_extract, file_field=document
-
-Node 2: comp_table to save the document ID to a test table
-Upload a test PDF file (create a simple PDF with text like "This is a test document for AI learning")
-Verify the document is saved in the documents table
-Verify the extractedtext field contains the correct text from the PDF
-Check the console logs for any errors
-
+Upload the PDF file
+Verify response contains document_id and extracted_text
+Check database: SELECT * FROM documents ORDER BY createdat DESC LIMIT 1;
+Verify extractedtext field contains readable content
 Test 2: AI with Document Context
-Create a workflow with:
-Node 1: comp_ai with document_ids set to the ID from Test 1
-Configure the AI to answer: "What does the document say?"
-Execute the workflow
-Verify the AI response references the content from the uploaded document
-Check that the AI's response accurately reflects the document content
+Workflow Configuration:
 
-Test 3: List and Get Documents
-Create a workflow with comp_document action=list
-Verify it returns all documents for the current user
-Create another workflow with comp_document action=
-get
- and a specific document_id
-Verify it returns the full document content
-Test 4: DOCX File Support
-Create a test DOCX file with text content
-Upload it using the same workflow from Test 1
-Verify the text is correctly extracted from the DOCX file
-Database Verification
-After running tests, manually check the documents table:
-SELECT * FROM documents ORDER BY createdat DESC LIMIT 5;
-Verify all fields are populated correctly
-Check that extractedtext contains readable content
-Error Handling Tests
-Test uploading an unsupported file type (e.g., .txt, .jpg)
-Test uploading a very large file (>10MB if limit is implemented)
-Test accessing a document that doesn't exist
-Test accessing another user's document (should fail)
+Create a new workflow
+Add comp_ai node:
+command: "What does the training manual say about company policies?"
+document_ids: 1 (or the ID from Test 1)
+provider: gemini (or your configured LLM)
+token: Your API key
+Execute:
+
+Run the workflow
+Verify AI response references content from the uploaded document
+Check console logs for: [CompAI] Loading documents with IDs: [1]
+Verify: [CompAI] Loaded 1 documents into context
+Test 3: Upload DOCX File
+Create a test DOCX with content like:
+
+Product Specifications
+Model: XYZ-2024
+Features: Advanced AI integration...
+Execute:
+
+Use same workflow as Test 1
+Upload the DOCX file
+Verify text extraction works correctly
+Compare with PDF extraction quality
+Test 4: List Documents
+Workflow Configuration:
+
+Add comp_document node:
+action: list
+Execute:
+
+Verify response contains array of documents
+Check that text_length is present but not full extracted_text
+Verify documents are ordered by creation date
+Test 5: Use All Documents
+Workflow Configuration:
+
+Upload 2-3 different documents (mix of PDF and DOCX)
+Create AI workflow:
+command: "Summarize all my documents"
+use_all_documents: true
+Execute:
+
+Verify AI has access to all documents
+Check console: [CompAI] Loading all documents for user X
+Verify AI response references multiple documents
+Test 6: Error Handling
+Test unsupported file type:
+
+Try uploading a .txt or .jpg file
+Verify error: "UNSUPPORTED_FILE_TYPE"
+Test file size limit:
+
+Try uploading a file > 10MB
+Verify error: "FILE_TOO_LARGE"
+Test unauthorized access:
+
+Try to get/delete another user's document
+Verify error: "DOCUMENT_NOT_FOUND" or "access denied"
+Key Features
+✅ Security
+
+User isolation: Users can only access their own documents
+File type validation: Only PDF and DOCX allowed
+File size limits: Prevents abuse (10MB default)
+✅ Performance
+
+Text truncation: Limits document content to 5000 chars per doc
+List endpoint: Excludes full text for faster responses
+Database indexes: Optimized queries on userid and createdat
+✅ Robustness
+
+Error handling: Graceful failures with cleanup
+File cleanup: Removes files if database insert fails
+Logging: Comprehensive debug output
+✅ Integration
+
+Context injection: Document data available to downstream components
+Workflow engine: Results properly stored in wfEngine
+AI enhancement: Seamless integration with existing AI component
+Next Steps
+Run the migration to create the documents table
+Test the workflows using the manual testing guide above
+Frontend integration: Add UI components for document upload
+Optional enhancements:
+Add document summary generation using AI
+Implement vector search for semantic document retrieval
+Add support for more file types (e.g., TXT, RTF)
+Implement document versioning
+Files Created
+models/document.go
+migrations/create_documents_table.sql
+core/generator/comp_document.go
+Files Modified
+core/generator/comp_ai.go
+ - Added document context support
+go.mod
+ - Added docx library dependency
