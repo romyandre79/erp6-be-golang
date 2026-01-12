@@ -332,12 +332,16 @@ func eventHandler(evt interface{}) {
 		// Inject callback for real-time WhatsApp messaging
 		// This allows components like SendMessage to trigger immediate updates
 		lastSentMsg := ""
+
 		waCallback := func(msg string) {
 			if msg != "" {
-				recipient := v.Info.Sender.User + "@s.whatsapp.net"
-				SendMessage(recipient, msg)
-				fmt.Printf("[WA Debug] Real-time message sent to %s: %s\n", recipient, msg)
-				lastSentMsg = msg
+				recipient := senderPhone + "@s.whatsapp.net"
+				if err := SendMessage(recipient, msg); err == nil {
+					fmt.Printf("[WA Debug] Real-time message sent to %s: %s\n", recipient, msg)
+					lastSentMsg = msg
+				} else {
+					fmt.Printf("[WA Debug] Failed to send real-time message to %s: %v\n", recipient, err)
+				}
 			}
 		}
 		
