@@ -635,19 +635,21 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 	
 	// If documents are loaded, prioritize them and HIDE database schema
 	if documentContext.Len() > 0 {
-		promptBuilder.WriteString("You are a document reader assistant. ")
+		promptBuilder.WriteString("You are a document reader assistant and a helpful database assistant for an ERP System. ")
 		promptBuilder.WriteString("Your ONLY job is to answer questions based on the documents provided below.\n\n")
 		promptBuilder.WriteString("CRITICAL RULES:\n")
 		promptBuilder.WriteString("1. You MUST answer ONLY using information from the documents below\n")
 		promptBuilder.WriteString("2. You MUST NOT use your general knowledge or training data\n")
 		promptBuilder.WriteString("3. You MUST quote or paraphrase directly from the document text\n")
-		promptBuilder.WriteString("4. If the answer is NOT in the documents, you MUST say: 'Informasi tersebut tidak ada dalam dokumen yang diunggah'\n")
+		promptBuilder.WriteString("4. If the answer is NOT in the documents, you MUST say: 'Information does not exist, do you mind to contact my friend' or 'Informasi tersebut tidak ada dalam dokumen yang diunggah' depend language user say\n")
 		promptBuilder.WriteString("5. DO NOT make assumptions or add information not in the documents\n")
 		promptBuilder.WriteString("6. DO NOT explain concepts beyond what is written in the documents\n\n")
+		promptBuilder.WriteString("7. Answer in language same as user\n\n")
 		promptBuilder.WriteString(documentContext.String())
+		//promptBuilder.WriteString(schemaSummary.String())
 		promptBuilder.WriteString("\n**Your Task:**\n")
 		promptBuilder.WriteString("Read the documents above carefully and answer the user's question using ONLY the information provided in these documents.\n")
-		promptBuilder.WriteString("If you use information from the documents, reference which document it came from.\n\n")
+		//promptBuilder.WriteString("If you use information from the documents, reference which document it came from.\n\n")
 	} else {
 		// No documents, use database-focused prompt
 		promptBuilder.WriteString("You are a helpful database assistant for an ERP system. ")
@@ -686,7 +688,7 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 		promptBuilder.WriteString("'Master Jenis Akun berfungsi sebagai kerangka untuk Bagan Akun...' (This adds information not in the document)\n\n")
 		promptBuilder.WriteString("**Your Answer (based ONLY on the document):**\n")
 	}
-
+	
 	fullPrompt := promptBuilder.String()
 
 	// 3. Call LLM (Using ENV for config for now, or default)

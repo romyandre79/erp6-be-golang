@@ -384,6 +384,53 @@ func handleTransform(ctx *WorkflowContext) error {
 			result[k] = v
 		}
 
+	case "split_string":
+		// Split a string field into an array
+		result = make(map[string]interface{})
+		
+		targetString := ""
+		found := false
+		
+		if keyField != "" {
+			if val, ok := resultMap[keyField]; ok {
+				targetString = fmt.Sprintf("%v", val)
+				found = true
+			}
+		} 
+		
+		if !found {
+			// If no key specified or found, try to find "message" or "result" or just take the first value
+			if val, ok := resultMap["message"]; ok {
+				targetString = fmt.Sprintf("%v", val)
+			} else if val, ok := resultMap["result"]; ok {
+				targetString = fmt.Sprintf("%v", val)
+			} else {
+				// Fallback: take first value
+				for _, v := range resultMap {
+					targetString = fmt.Sprintf("%v", v)
+					break
+				}
+			}
+		}
+
+		if separator == "" {
+			separator = ","
+		}
+
+		parts := strings.Split(targetString, separator)
+		finalParts := make([]interface{}, 0, len(parts))
+		for _, p := range parts {
+			trimmed := strings.TrimSpace(p)
+			if trimmed != "" {
+				finalParts = append(finalParts, trimmed)
+			}
+		}
+
+		// Return as "result" key for comp_for to detect as columnar
+		result["result"] = finalParts
+		
+		fmt.Printf("[Transform] split_string - Input: '%s', Sep: '%s', Count: %d\n", targetString, separator, len(finalParts))
+
 	default:
 		return fmt.Errorf("unknown transform_type: %s", transformType)
 	}
