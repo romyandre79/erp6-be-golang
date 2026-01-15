@@ -405,60 +405,182 @@ func init() {
 	})
 	
 	// Optional: Register a "TelegramReply" component if they want explicit send
+}
+
+
+// SendTelegramMedia sends media (photo/video/document) from URL
+func SendTelegramMedia(chatID int64, mediaURL, mediaType, caption string) error {
+	if tgBot == nil {
+		return fmt.Errorf("Telegram bot not initialized")
+	}
+
+	var msg tgbotapi.Chattable
+
+	switch strings.ToLower(mediaType) {
+	case "image", "photo":
+		photo := tgbotapi.NewPhoto(chatID, tgbotapi.FileURL(mediaURL))
+		photo.Caption = caption
+		msg = photo
+	case "video":
+		video := tgbotapi.NewVideo(chatID, tgbotapi.FileURL(mediaURL))
+		video.Caption = caption
+		msg = video
+	case "document", "file":
+		doc := tgbotapi.NewDocument(chatID, tgbotapi.FileURL(mediaURL))
+		doc.Caption = caption
+		msg = doc
+	case "audio":
+		audio := tgbotapi.NewAudio(chatID, tgbotapi.FileURL(mediaURL))
+		audio.Caption = caption
+		msg = audio
+	default:
+		// Fallback to text + link? Or error?
+		// Let's try sending as document if unknown
+		doc := tgbotapi.NewDocument(chatID, tgbotapi.FileURL(mediaURL))
+		doc.Caption = caption
+		msg = doc
+	}
+
+	_, err := tgBot.Send(msg)
+	return err
+}
+
+// SendTelegramButtons sends text with Inline Keyboard Buttons
+func SendTelegramButtons(chatID int64, text string, buttons []string) error {
+	if tgBot == nil {
+		return fmt.Errorf("Telegram bot not initialized")
+	}
+
+	msg := tgbotapi.NewMessage(chatID, text)
+	
+	// Construct Inline Keyboard
+	var rows [][]tgbotapi.InlineKeyboardButton
+	
+	for _, btnText := range buttons {
+		// Format: "id:Label" or Just "Label" (id=Label)
+		// For Telegram Callback, Data is the ID.
+		label := btnText
+		data := btnText
+		
+		parts := strings.SplitN(btnText, ":", 2)
+		if len(parts) == 2 {
+			data = strings.TrimSpace(parts[0])
+			label = strings.TrimSpace(parts[1])
+		}
+		
+		btn := tgbotapi.NewInlineKeyboardButtonData(label, data)
+		// row with 1 button
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(btn))
+	}
+	
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(rows...)
+	msg.ReplyMarkup = keyboard
+
+	_, err := tgBot.Send(msg)
+	return err
+}
+
+func init() {
 	RegisterComponent("TelegramReply", func(ctx *WorkflowContext) error {
 		// Find message and chat_id
 		var msg string
-		var chatID int64
+		var chatIDs []int64
+		var mediaURL string
+		var mediaType string
+		var btnStr string
 		
 		// 1. Get message from input params (mapped in designer)
 		for _, p := range ctx.Params {
-			if strings.ToLower(p.InputName) == "message" {
+			switch strings.ToLower(p.InputName) {
+			case "message":
 				msg = ResolveParam(ctx.FiberCtx, p.CompValue)
-			}
-			if strings.ToLower(p.InputName) == "chat_id" {
-				// Try to parse
+			case "chat_id":
 				cidStr := ResolveParam(ctx.FiberCtx, p.CompValue)
-				fmt.Sscanf(cidStr, "%d", &chatID)
+				parts := strings.Split(cidStr, ",")
+				for _, part := range parts {
+					var cid int64
+					if _, err := fmt.Sscanf(strings.TrimSpace(part), "%d", &cid); err == nil && cid != 0 {
+						chatIDs = append(chatIDs, cid)
+					}
+				}
+			case "media_url", "image", "video", "url":
+				mediaURL = ResolveParam(ctx.FiberCtx, p.CompValue)
+			case "media_type", "type":
+				mediaType = ResolveParam(ctx.FiberCtx, p.CompValue)
+			case "buttons", "button":
+				btnStr = ResolveParam(ctx.FiberCtx, p.CompValue)
 			}
 		}
 		
-		// 2. Fallback: Look in wfEngine for "Telegram" node (for chat_id) and last result (for message)
-		if wfEngine, ok := ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine); ok {
-			// Find chat_id
-			if chatID == 0 {
+		// 2. Fallback
+		if len(chatIDs) == 0 {
+			if wfEngine, ok := ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine); ok {
 				for i := len(wfEngine) - 1; i >= 0; i-- {
 					if wfEngine[i].ComponentName == "Telegram" {
 						if res, ok := wfEngine[i].ResultNode.(map[string]interface{}); ok {
 							if cid, ok := res["chat_id"].(int64); ok {
-								chatID = cid
+								chatIDs = append(chatIDs, cid)
 							}
 						}
 						break
 					}
 				}
 			}
-			
-			// Find message (if not param)
-			if msg == "" {
+		}
+
+		if msg == "" {
 				// Look for last result with "message"
+				if wfEngine, ok := ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine); ok {
 				for i := len(wfEngine) - 1; i >= 0; i-- {
-					if res, ok := wfEngine[i].ResultNode.(map[string]interface{}); ok {
-						if m, ok := res["message"].(string); ok && m != "" {
-							msg = m
-							break
+						if res, ok := wfEngine[i].ResultNode.(map[string]interface{}); ok {
+							if m, ok := res["message"].(string); ok && m != "" {
+								msg = m
+								break
+							}
 						}
 					}
 				}
-			}
 		}
 		
-		if chatID != 0 && msg != "" {
-			SendTelegramMessage(chatID, msg)
+		// Logic
+		for _, chatID := range chatIDs {
+			var err error
+				
+			if btnStr != "" {
+				buttons := strings.Split(btnStr, ",")
+				for i, b := range buttons {
+					buttons[i] = strings.TrimSpace(b)
+				}
+				err = SendTelegramButtons(chatID, msg, buttons)
+			} else if mediaURL != "" {
+				if mediaType == "" {
+					if strings.HasSuffix(mediaURL, ".mp4") {
+						mediaType = "video"
+					} else if strings.HasSuffix(mediaURL, ".pdf") || strings.HasSuffix(mediaURL, ".xlsx") {
+						mediaType = "document"
+					} else {
+						mediaType = "image"
+					}
+				}
+				err = SendTelegramMedia(chatID, mediaURL, mediaType, msg)
+			} else {
+				if msg != "" {
+					err = SendTelegramMessage(chatID, msg)
+				}
+			}
+			
+			if err != nil {
+				fmt.Printf("[TelegramReply] Error sending to %d: %v\n", chatID, err)
+			}
+			
+			time.Sleep(50 * time.Millisecond)
 		}
 		
 		return nil
 	})
 }
+
+
 
 func authorizeTelegramUser(telegramUserID int64) (*models.Useraccess, error) {
 	if tgDB == nil {

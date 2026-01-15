@@ -23,7 +23,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/helmet"
 	"github.com/gofiber/fiber/v2/middleware/limiter"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
 //go:generate go run generate.go
@@ -174,6 +176,9 @@ func main() {
 		JSONDecoder:       json.Unmarshal,
 		Prefork:           prefork,
 	})
+
+	app.Use(recover.New())
+	app.Use(helmet.New())
 
 	app.Use(limiter.New(limiter.Config{
 		Max:        LimiterMax,

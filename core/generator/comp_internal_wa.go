@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -647,3 +649,248 @@ func SendMessage(jidStr string, text string) error {
 	_, err = waClient.SendMessage(ctx, jid, msg)
 	return err
 }
+
+
+// SendWhatsAppMedia sends media from a URL
+func SendWhatsAppMedia(jidStr, mediaURL, mediaType, caption string) error {
+	if waClient == nil {
+		return fmt.Errorf("client not initialized")
+	}
+
+	jid, err := types.ParseJID(jidStr)
+	if err != nil {
+		if !strings.Contains(jidStr, "@") {
+			jidStr = jidStr + "@s.whatsapp.net"
+			jid, err = types.ParseJID(jidStr)
+		}
+		if err != nil {
+			return fmt.Errorf("invalid JID: %v", err)
+		}
+	}
+
+	// Download media
+	resp, err := http.Get(mediaURL)
+	if err != nil {
+		return fmt.Errorf("failed to download media: %v", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read media body: %v", err)
+	}
+
+	var msg *waProto.Message
+	
+	switch strings.ToLower(mediaType) {
+	case "image":
+		uploaded, err := waClient.Upload(context.Background(), data, whatsmeow.MediaImage)
+		if err != nil {
+			return err
+		}
+		msg = &waProto.Message{
+			ImageMessage: &waProto.ImageMessage{
+				Caption:       proto.String(caption),
+				URL:           proto.String(uploaded.URL),
+				DirectPath:    proto.String(uploaded.DirectPath),
+				MediaKey:      uploaded.MediaKey,
+				Mimetype:      proto.String("image/jpeg"), // Default
+				FileEncSHA256: uploaded.FileEncSHA256,
+				FileSHA256:    uploaded.FileSHA256,
+				FileLength:    proto.Uint64(uint64(len(data))),
+			},
+		}
+	case "video":
+		uploaded, err := waClient.Upload(context.Background(), data, whatsmeow.MediaVideo)
+		if err != nil {
+			return err
+		}
+		msg = &waProto.Message{
+			VideoMessage: &waProto.VideoMessage{
+				Caption:       proto.String(caption),
+				URL:           proto.String(uploaded.URL),
+				DirectPath:    proto.String(uploaded.DirectPath),
+				MediaKey:      uploaded.MediaKey,
+				Mimetype:      proto.String("video/mp4"), // Default
+				FileEncSHA256: uploaded.FileEncSHA256,
+				FileSHA256:    uploaded.FileSHA256,
+				FileLength:    proto.Uint64(uint64(len(data))),
+			},
+		}
+	case "document":
+		uploaded, err := waClient.Upload(context.Background(), data, whatsmeow.MediaDocument)
+		if err != nil {
+			return err
+		}
+		// Try to extract filename from URL
+		filename := filepath.Base(mediaURL)
+		if strings.Contains(filename, "?") {
+			filename = strings.Split(filename, "?")[0]
+		}
+		
+		msg = &waProto.Message{
+			DocumentMessage: &waProto.DocumentMessage{
+				Caption:       proto.String(caption),
+				URL:           proto.String(uploaded.URL),
+				DirectPath:    proto.String(uploaded.DirectPath),
+				MediaKey:      uploaded.MediaKey,
+				Mimetype:      proto.String("application/octet-stream"),
+				Title:         proto.String(filename),
+				FileEncSHA256: uploaded.FileEncSHA256,
+				FileSHA256:    uploaded.FileSHA256,
+				FileLength:    proto.Uint64(uint64(len(data))),
+			},
+		}
+	default: 
+		return fmt.Errorf("unsupported media type: %s", mediaType)
+	}
+
+	_, err = waClient.SendMessage(context.Background(), jid, msg)
+	return err
+}
+
+// SendWhatsAppButtons sends a text message with buttons
+func SendWhatsAppButtons(jidStr, text string, buttons []string) error {
+	if waClient == nil {
+		return fmt.Errorf("client not initialized")
+	}
+
+	jid, err := types.ParseJID(jidStr)
+	if err != nil {
+		if !strings.Contains(jidStr, "@") {
+			jidStr = jidStr + "@s.whatsapp.net"
+			jid, err = types.ParseJID(jidStr)
+		}
+		if err != nil {
+			return fmt.Errorf("invalid JID: %v", err)
+		}
+	}
+
+	// Dynamic Buttons
+	var waButtons []*waProto.ButtonsMessage_Button
+	for i, btnText := range buttons {
+		id := fmt.Sprintf("btn_%d", i+1)
+		parts := strings.SplitN(btnText, ":", 2)
+		if len(parts) == 2 {
+			id = strings.TrimSpace(parts[0])
+			btnText = strings.TrimSpace(parts[1])
+		}
+		
+		waButtons = append(waButtons, &waProto.ButtonsMessage_Button{
+			ButtonID: proto.String(id),
+			ButtonText: &waProto.ButtonsMessage_Button_ButtonText{
+				DisplayText: proto.String(btnText),
+			},
+			Type: waProto.ButtonsMessage_Button_RESPONSE.Enum(),
+		})
+	}
+
+	// NOTE: ButtonsMessage is deprecated/limited support on some devices.
+	// Using TemplateMessage or InteractiveMessage is preferred but more complex.
+	// We'll attempt basic ButtonsMessage first.
+	msg := &waProto.Message{
+		ButtonsMessage: &waProto.ButtonsMessage{
+			ContentText: proto.String(text),
+			Buttons:     waButtons,
+			HeaderType:  waProto.ButtonsMessage_TEXT.Enum(),
+		},
+	}
+
+	_, err = waClient.SendMessage(context.Background(), jid, msg)
+	return err
+}
+
+func init() {
+	RegisterComponent("Internal Whatsapp", func(ctx *WorkflowContext) error {
+		var msg string
+		var phoneNumbers []string
+		var mediaURL string
+		var mediaType string
+		var btnStr string
+
+		// 1. Get params
+		for _, p := range ctx.Params {
+			switch strings.ToLower(p.InputName) {
+			case "message":
+				msg = ResolveParam(ctx.FiberCtx, p.CompValue)
+			case "phone_number", "phone", "sendto":
+				val := ResolveParam(ctx.FiberCtx, p.CompValue)
+				parts := strings.Split(val, ",")
+				for _, part := range parts {
+					clean := strings.TrimSpace(part)
+					if clean != "" {
+						phoneNumbers = append(phoneNumbers, clean)
+					}
+				}
+			case "media_url", "image", "video", "url":
+				mediaURL = ResolveParam(ctx.FiberCtx, p.CompValue)
+			case "media_type", "type":
+				mediaType = ResolveParam(ctx.FiberCtx, p.CompValue)
+			case "buttons", "button":
+				btnStr = ResolveParam(ctx.FiberCtx, p.CompValue)
+			}
+		}
+
+		// 2. Fallback
+		if msg == "" {
+			if wfEngine, ok := ctx.FiberCtx.Locals("wfEngine").([]WorkflowEngine); ok {
+				for i := len(wfEngine) - 1; i >= 0; i-- {
+					if res, ok := wfEngine[i].ResultNode.(map[string]interface{}); ok {
+						if m, ok := res["message"].(string); ok && m != "" {
+							msg = m
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if len(phoneNumbers) == 0 {
+			return fmt.Errorf("phone_number is required")
+		}
+
+		fmt.Printf("[Internal Whatsapp] Broadcasting to %d recipients\n", len(phoneNumbers))
+
+		for _, phone := range phoneNumbers {
+			var err error
+			
+			// Priority: Buttons > Media > Text
+			if btnStr != "" {
+				buttons := strings.Split(btnStr, ",")
+				// Trim spaces
+				for i, b := range buttons {
+					buttons[i] = strings.TrimSpace(b)
+				}
+				err = SendWhatsAppButtons(phone, msg, buttons)
+			} else if mediaURL != "" {
+				// Guess type if missing
+				if mediaType == "" {
+					if strings.HasSuffix(mediaURL, ".mp4") {
+						mediaType = "video"
+					} else if strings.HasSuffix(mediaURL, ".pdf") || strings.HasSuffix(mediaURL, ".doc") || strings.HasSuffix(mediaURL, ".docx") || strings.HasSuffix(mediaURL, ".xls") {
+						mediaType = "document"
+					} else {
+						mediaType = "image"
+					}
+				}
+				err = SendWhatsAppMedia(phone, mediaURL, mediaType, msg)
+			} else {
+				if msg == "" {
+					fmt.Printf("[Internal Whatsapp] No message content to send to %s\n", phone)
+					continue
+				}
+				err = SendMessage(phone, msg)
+			}
+
+			if err != nil {
+				fmt.Printf("[Internal Whatsapp] Failed to send to %s: %v\n", phone, err)
+			} else {
+				fmt.Printf("[Internal Whatsapp] Sent to %s\n", phone)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		return nil
+	})
+}
+

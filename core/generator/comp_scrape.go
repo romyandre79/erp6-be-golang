@@ -41,6 +41,8 @@ func handleScrape(ctx *WorkflowContext) error {
 		submitSelector  string
 		waitTime        string
 		destinationPath string
+		userDataDir     string
+		headless        string = "true" // Default to true
 	)
 
 	// Extract parameters
@@ -75,6 +77,10 @@ func handleScrape(ctx *WorkflowContext) error {
 			waitTime = val
 		case "destination_path":
 			destinationPath = val
+		case "user_data_dir":
+			userDataDir = val
+		case "headless":
+			headless = val
 		}
 	}
 
@@ -107,6 +113,12 @@ func handleScrape(ctx *WorkflowContext) error {
 		json.Unmarshal([]byte(headersJSON), &customHeaders)
 	}
 
+	// Parse headless boolean
+	isHeadless := true
+	if strings.ToLower(headless) == "false" || headless == "0" {
+		isHeadless = false
+	}
+
 	// Logic to perform scraping
 	var result interface{}
 	var err error
@@ -116,14 +128,14 @@ func handleScrape(ctx *WorkflowContext) error {
 	switch action {
 	case "get_html":
 		if method == "browser" {
-			result, err = scrapeWithBrowser(url, userAgent, "html", waitMs)
+			result, err = scrapeWithBrowser(url, userAgent, "html", waitMs, userDataDir, isHeadless)
 		} else {
 			result, err = scrapeWithHTTP(url, userAgent, customHeaders, "html")
 		}
 
 	case "extract_text":
 		if method == "browser" {
-			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs)
+			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs, userDataDir, isHeadless)
 			if err == nil {
 				result, err = extractTextFromHTML(getHTMLFromResult(html), selector)
 			}
@@ -136,7 +148,7 @@ func handleScrape(ctx *WorkflowContext) error {
 
 	case "extract_links":
 		if method == "browser" {
-			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs)
+			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs, userDataDir, isHeadless)
 			if err == nil {
 				result, err = extractLinksFromHTML(getHTMLFromResult(html), selector)
 			}
@@ -149,7 +161,7 @@ func handleScrape(ctx *WorkflowContext) error {
 
 	case "extract_images":
 		if method == "browser" {
-			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs)
+			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs, userDataDir, isHeadless)
 			if err == nil {
 				result, err = extractImagesFromHTML(getHTMLFromResult(html), selector)
 			}
@@ -162,7 +174,7 @@ func handleScrape(ctx *WorkflowContext) error {
 
 	case "extract_data":
 		if method == "browser" {
-			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs)
+			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs, userDataDir, isHeadless)
 			if err == nil {
 				result, err = extractDataWithRules(getHTMLFromResult(html), extractionRules)
 			}
@@ -181,7 +193,7 @@ func handleScrape(ctx *WorkflowContext) error {
 
 	case "extract_one_data":
 		if method == "browser" {
-			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs)
+			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs, userDataDir, isHeadless)
 			if err == nil {
 				result, err = extractDataWithRules(getHTMLFromResult(html), extractionRules)
 			}
@@ -215,7 +227,7 @@ func handleScrape(ctx *WorkflowContext) error {
 
 		// Only works with browser method
 		if method == "browser" {
-			html, err := scrapeWithFormSubmit(url, userAgent, formData, submitSelector, clickSelector, waitMs)
+			html, err := scrapeWithFormSubmit(url, userAgent, formData, submitSelector, clickSelector, waitMs, userDataDir, isHeadless)
 			if err == nil {
 				result, err = extractDataWithRules(getHTMLFromResult(html), extractionRules)
 			}
@@ -233,7 +245,7 @@ func handleScrape(ctx *WorkflowContext) error {
 		// Get the page text first
 		var textStr string
 		if method == "browser" {
-			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs)
+			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs, userDataDir, isHeadless)
 			if err == nil {
 				textResult, err := extractTextFromHTML(getHTMLFromResult(html), "")
 				if err == nil {
@@ -263,7 +275,7 @@ func handleScrape(ctx *WorkflowContext) error {
 
 	case "extract_hierarchy":
 		if method == "browser" {
-			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs)
+			html, err := scrapeWithBrowser(url, userAgent, "html", waitMs, userDataDir, isHeadless)
 			if err == nil {
 				result, err = extractHierarchy(getHTMLFromResult(html), extractionRules)
 			}
@@ -284,7 +296,7 @@ func handleScrape(ctx *WorkflowContext) error {
 			var pageURL string
 			
 			if method == "browser" {
-				res, err := scrapeWithBrowser(url, userAgent, "html", waitMs)
+				res, err := scrapeWithBrowser(url, userAgent, "html", waitMs, userDataDir, isHeadless)
 				if err != nil {
 					return err
 				}
@@ -564,10 +576,10 @@ func getChromePaths() []string {
 	return paths
 }
 
-func scrapeWithBrowser(url, userAgent, returnType string, waitMs int) (interface{}, error) {
+func scrapeWithBrowser(url, userAgent, returnType string, waitMs int, userDataDir string, headless bool) (interface{}, error) {
 	// Try to use chromedp, but fallback to HTTP if it fails
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", true),
+		chromedp.Flag("headless", headless),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-dev-shm-usage", true),
@@ -575,6 +587,11 @@ func scrapeWithBrowser(url, userAgent, returnType string, waitMs int) (interface
 		chromedp.Flag("disable-blink-features", "AutomationControlled"), // Hide automation flag
 		chromedp.UserAgent(userAgent), // Set custom User-Agent
 	)
+
+	// Add userDataDir if provided
+	if userDataDir != "" {
+		opts = append(opts, chromedp.UserDataDir(userDataDir))
+	}
 
 	// Try to find Chrome/Chromium
 	chromePaths := getChromePaths()
@@ -617,9 +634,9 @@ func scrapeWithBrowser(url, userAgent, returnType string, waitMs int) (interface
 	}, nil
 }
 
-func scrapeWithFormSubmit(url, userAgent string, formData map[string]string, submitSelector, clickSelector string, waitMs int) (interface{}, error) {
+func scrapeWithFormSubmit(url, userAgent string, formData map[string]string, submitSelector, clickSelector string, waitMs int, userDataDir string, headless bool) (interface{}, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.Flag("headless", true),
+		chromedp.Flag("headless", headless),
 		chromedp.Flag("disable-gpu", true),
 		chromedp.Flag("no-sandbox", true),
 		chromedp.Flag("disable-dev-shm-usage", true),
@@ -627,6 +644,11 @@ func scrapeWithFormSubmit(url, userAgent string, formData map[string]string, sub
 		chromedp.Flag("disable-blink-features", "AutomationControlled"), // Hide automation flag
 		chromedp.UserAgent(userAgent), // Set custom User-Agent
 	)
+
+	// Add userDataDir if provided
+	if userDataDir != "" {
+		opts = append(opts, chromedp.UserDataDir(userDataDir))
+	}
 
 	// Try to find Chrome/Chromium
 	chromePaths := getChromePaths()

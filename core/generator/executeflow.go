@@ -929,6 +929,11 @@ func resolveVariable(c *fiber.Ctx, key string) string {
 		return fmt.Sprintf("%v", v)
 	}
 
+	// 5. Check Environment Variables
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+
 	// Return original key if not found
 	return "$" + key
 }
