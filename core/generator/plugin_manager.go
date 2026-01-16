@@ -346,6 +346,19 @@ func LoadPlugins(db *gorm.DB) {
 	// 1. Get all components/classes
 	var components []models.Component
 	db.Find(&components)
+	
+	// --- INTERNAL COMPONENT INITIALIZATION ---
+	// Set DB for WhatsApp and Init
+	SetWADatabase(db)
+	if err := InitWhatmeow(); err != nil {
+		fmt.Printf("Failed to init WhatsMeow: %v\n", err)
+	} else {
+		fmt.Println("WhatsMeow initialized successfully")
+	}
+	
+	// Set DB for AI
+	// SetAiDatabase(db)
+	// -----------------------------------------
 
 	// Map class -> component
 	classMap := make(map[string]bool)

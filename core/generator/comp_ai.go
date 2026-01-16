@@ -415,7 +415,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config 
 
 	// WA Registration Command
 	if strings.HasPrefix(lowerCmd, "register wa api") {
-		qr, err := GetLoginQR()
+		qr, err := GetLoginQR("new")
 		if err != nil {
 			return map[string]interface{}{
 				"message": fmt.Sprintf("Error initializing WhatsApp: %v", err),

@@ -218,6 +218,9 @@ func main() {
 	generator.LoadPlugins(db)
 	log.Print("End Load Workflow Components ...")
 
+	// Register WA Routes
+	generator.RegisterWARoutes(app)
+
 	app.All("/api/webhook/:source", func(c *fiber.Ctx) error {
 		return plugin.WebhookHandler(c, db)
 	})
