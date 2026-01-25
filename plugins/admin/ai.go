@@ -3,6 +3,7 @@ package admin
 import (
 	"erp6-be-golang/core/helpers"
 	"erp6-be-golang/models"
+	dbgenerator "erp6-be-golang/core/generator"
 	"fmt"
 	"strings"
 
@@ -121,4 +122,58 @@ func handleCreateWorkflow(c *fiber.Ctx, db *gorm.DB, message string) error {
 		"reply": fmt.Sprintf("Success! Workflow '%s' has been created.", wfName),
 		"data":  newWf,
 	})
+}
+
+func AiUploadHandler(c *fiber.Ctx, db *gorm.DB) error {
+	fmt.Println("[AiUploadHandler] Started handling upload request")
+	
+	// Get requested component (default to 'upload')
+	componentRequest := c.FormValue("component")
+	if componentRequest == "" {
+		componentRequest = "upload"
+	}
+
+	fmt.Printf("[AiUploadHandler] Using component: %s\n", componentRequest)
+
+	var params []dbgenerator.WorkflowDetailResult
+
+	if componentRequest == "document" {
+		params = []dbgenerator.WorkflowDetailResult{
+			{InputName: "action", CompValue: "upload_and_extract"},
+			{InputName: "file_field", CompValue: "file"},
+		}
+	} else {
+		// Generic upload defaults
+		params = []dbgenerator.WorkflowDetailResult{
+			{InputName: "filefield", CompValue: "file"},
+			{InputName: "destination", CompValue: "public/chat_uploads"}, // Separate folder for chat uploads
+			{InputName: "rename", CompValue: "true"},
+		}
+	}
+	
+	// Create a mock WorkflowContext
+	ctx := &dbgenerator.WorkflowContext{
+		FiberCtx: c,
+		DB:       db,
+		Params:   params,
+		Extras:   make(map[string]interface{}),
+	}
+
+	// Get the component handler
+	handler, ok := dbgenerator.GetComponent(componentRequest)
+	if !ok {
+		fmt.Printf("[AiUploadHandler] Error: Component '%s' not found in registry\n", componentRequest)
+		return helpers.FailResponse(c, fiber.StatusInternalServerError, "COMPONENT_ERROR", "Component not found: "+componentRequest)
+	}
+
+	fmt.Println("[AiUploadHandler] Component found, executing...")
+
+	// Execute the component
+	if err := handler.Execute(ctx); err != nil {
+		fmt.Printf("[AiUploadHandler] Error executing component: %v\n", err)
+		return err
+	}
+
+	fmt.Println("[AiUploadHandler] Execution successful")
+	return nil
 }

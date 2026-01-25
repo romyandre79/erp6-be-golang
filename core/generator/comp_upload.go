@@ -128,9 +128,10 @@ func handleUpload(ctx *WorkflowContext) error {
 	fmt.Printf("[CompUpload] Metadata stored in Extras for key '%s'\n", filefield)
 
 	// Also Update wfEngine result
-	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
-	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultData})
-	c.Locals("wfEngine", wfEngine)
+	if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
+		wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: resultData})
+		c.Locals("wfEngine", wfEngine)
+	}
 
 	helpers.SuccessResponse(c, "FILE UPLOADED", resultData)
 

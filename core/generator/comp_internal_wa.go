@@ -2,6 +2,7 @@ package generator
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
@@ -61,25 +62,7 @@ func InitWhatmeow() error {
 		return fmt.Errorf("database not initialized")
 	}
 
-	// GET RAW CONNECTION STRING
-	// We need to construct the DSN for sqlstore "mysql"
-	// Best way needs explicit config, but we can try to reuse the existing pool if supported, 
-	// or just open a new one with same credentials. 
-	// For now, let's assume standard MySQL DSN.
-	// Since we can't easily extract DSN from GORM, we might need a workaround.
-	// However, `sqlstore.New` takes a dialect and URI.
-	// Let's assume we can get it from env or just use a generic DSN if previously set.
-	// A better approach for integrated systems: Use the existing `*sql.DB`? 
-	// sqlstore doesn't support passing *sql.DB directly in `New`, but `NewWithDB` might exist? 
-	// Checking docs... `New` opens it. 
-	// Workaround: We will use the standard DSN format.
-	
-	// Use SQLite for Whatsmeow as MySQL support is missing in this version
-	// Store in a local file "wa-session.db"
-	// Use SQLite for Whatsmeow as MySQL support is missing in this version
-	// Store in a local file "wa-session.db"
-	// modernc.org/sqlite: use _txlock=immediate to avoid nested transaction errors.
-	// Enable WAL mode for better concurrency to fix "database is locked" errors.
+	// Raw Connection
 	dsn := "file:wa-session.db?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_busy_timeout=30000&_txlock=immediate"
 	container, err := sqlstore.New(context.Background(), "sqlite", dsn, dbLog)
 	if err != nil {
@@ -155,6 +138,28 @@ func updateDeviceStatus(phone, jid, status string) {
 		}
 		waDB.Save(&dev)
 	}
+}
+
+// Log message to database
+func logWAMessage(direction, sender, recipient, msgType, content, caption, status string) {
+	if waDB == nil { return }
+	
+	// Ensure table exists (simple lazy migration)
+	if !waDB.Migrator().HasTable(&models.WhatsappMessage{}) {
+		waDB.AutoMigrate(&models.WhatsappMessage{})
+	}
+
+	log := models.WhatsappMessage{
+		Direction: direction,
+		Sender:    sender,
+		Recipient: recipient,
+		Type:      msgType,
+		Content:   content,
+		Caption:   caption,
+		Status:    status,
+		CreatedAt: time.Now(),
+	}
+	waDB.Create(&log)
 }
 
 // GetLoginQR generates a QR code for a specific phone number (or new one)
@@ -336,148 +341,190 @@ func authorizeWAUser(jid string) (*models.Useraccess, error) {
 // eventHandler now takes the specific client instance and its phone ID
 func eventHandler(client *whatsmeow.Client, myPhone string, evt interface{}) {
 	switch v := evt.(type) {
-	case *events.Message:
-		if v.Info.IsFromMe {
-			return
-		}
-		
-		fmt.Printf("[WA %s] Received Message from %s\n", myPhone, v.Info.Sender.User)
-		
-		// Use the client that received the message for all operations
-		
-		actualJID := v.Info.Sender.ToNonAD()
-		phoneNumber := actualJID.User
-		if strings.Contains(actualJID.Server, "lid") {
-			if v.Info.MessageSource.SenderAlt.User != "" {
-				phoneNumber = v.Info.MessageSource.SenderAlt.User
+		case *events.Message:
+			if v.Info.IsFromMe {
+				return
 			}
-		}
-
-		user, err := authorizeWAUser(phoneNumber)
-		if err != nil {
-			return
-		}
+			fmt.Printf("[WA %s] Received Message from %s\n", myPhone, v.Info.Sender.User)
 		
-		senderPhone := phoneNumber
-		
-		text := ""
-		mediaType := ""
-		var mediaData []byte
-		var mediaErr error
-		fileName := ""
-
-		if v.Message.GetConversation() != "" {
-			text = v.Message.GetConversation()
-		} else if v.Message.GetExtendedTextMessage().GetText() != "" {
-			text = v.Message.GetExtendedTextMessage().GetText()
-		} else {
-			// Check for Media
-			if img := v.Message.GetImageMessage(); img != nil {
-				mediaType = "image"
-				text = img.GetCaption()
-				mediaData, mediaErr = client.Download(context.Background(), v.Message.GetImageMessage())
-				fileName = "image_" + v.Info.ID + ".jpg"
-			} else if doc := v.Message.GetDocumentMessage(); doc != nil {
-				mediaType = "document"
-				text = doc.GetCaption()
-				mediaData, mediaErr = client.Download(context.Background(), v.Message.GetDocumentMessage())
-				fileName = doc.GetFileName()
-			} // ... other types ...
-		}
-
-		if mediaType != "" {
-			if mediaErr == nil {
-				saveDir := fmt.Sprintf("./public/uploads/whatsapp/%s", time.Now().Format("2006-01-02"))
-				os.MkdirAll(saveDir, 0755)
-				savePath := filepath.Join(saveDir, fileName)
-				os.WriteFile(savePath, mediaData, 0644)
-				SendMessageViaClient(client, senderPhone, fmt.Sprintf("✅ File received: %s", fileName))
-			}
-			if text == "" { return }
-		}
-		
-		// Create Request Context for Workflow
-		if text != "" && waDB != nil {
-			var reqCtx fasthttp.RequestCtx
-			reqCtx.Request.Header.SetMethod("POST")
-			reqCtx.Request.SetRequestURI("/whatsapp/aicommand")
-			reqCtx.PostArgs().Set("command", text)
+			// Use the client that received the message for all operations
 			
-			app := fiber.New()
-			c := app.AcquireCtx(&reqCtx)
-			defer app.ReleaseCtx(c)
-			
-			c.Locals("userid", user.Useraccessid)
-			c.Locals("username", user.Username)
-			c.Locals("db", waDB)
-			c.Locals("wfEngine", []WorkflowEngine{})
-
-			// Callback using SPECIFIC CLIENT
-			lastSentMsg := ""
-			waCallback := func(msg string) {
-				if msg != "" {
-					recipient := senderPhone + "@s.whatsapp.net"
-					// Send via the client that received the message
-					if _, err := client.SendMessage(context.Background(), types.NewJID(senderPhone, types.DefaultUserServer), &waProto.Message{Conversation: proto.String(msg)}); err == nil {
-						fmt.Printf("[WA %s] Real-time sent to %s: %s\n", myPhone, recipient, msg)
-						lastSentMsg = msg
-					} else {
-						fmt.Printf("[WA %s] Failed send to %s: %v\n", myPhone, recipient, err)
-					}
+			actualJID := v.Info.Sender.ToNonAD()
+			phoneNumber := actualJID.User
+			if strings.Contains(actualJID.Server, "lid") {
+				if v.Info.MessageSource.SenderAlt.User != "" {
+					phoneNumber = v.Info.MessageSource.SenderAlt.User
 				}
 			}
+
+			senderPhone := phoneNumber
 			
-			c.Locals("wfExtras", map[string]interface{}{
-				"send_wa_callback": waCallback,
-			})
-			
-			params := map[string]interface{}{} 
-			c.Locals("nestedWorkflow", false)
-			
-			if err := ExecuteFlow(c, waDB, "aicommand", false, params); err == nil {
-				// Process results similar to before...
-				// For brevity, using simplified result extraction
-				// (You can copy full extraction logic if needed, but the Core concept is using client)
+			content  := ""
+			caption  := ""
+			mediaType := "text"
+			var mediaData []byte
+			var mediaErr error
+			fileName := ""
+
+			if v.Message.GetConversation() != "" {
+				content = v.Message.GetConversation()
+			} else if v.Message.GetExtendedTextMessage().GetText() != "" {
+				content = v.Message.GetExtendedTextMessage().GetText()
+			} else if img := v.Message.GetImageMessage(); img != nil {
+				mediaType = "image"
+				caption = img.GetCaption()
+				mediaData, mediaErr = client.Download(context.Background(), img)
+				fileName = fmt.Sprintf("image_%s_%s.jpg", v.Info.ID, time.Now().Format("150405"))
+			} else if doc := v.Message.GetDocumentMessage(); doc != nil {
+				mediaType = "document"
+				caption = doc.GetCaption()
+				mediaData, mediaErr = client.Download(context.Background(), doc)
+				fileName = doc.GetFileName()
+				if fileName == "" { fileName = fmt.Sprintf("doc_%s", v.Info.ID) }
+			} else {
+				content = ""
+				mediaType = "unknown"
+			}
+
+			// Save media file if exists
+			if mediaType != "" {
+				if mediaErr == nil {
+					dateDir := time.Now().Format("2006-01-02")
+					saveDir := fmt.Sprintf("./public/uploads/whatsapp/%s", dateDir)
+					os.MkdirAll(saveDir, 0755)
+					savePath := filepath.Join(saveDir, fileName)
+					os.WriteFile(savePath, mediaData, 0644)
+					
+					// Set Content to Web Path for frontend display
+					// Ensure leading slash
+					webPath := fmt.Sprintf("/uploads/whatsapp/%s/%s", dateDir, fileName)
+					// If it was just [Image] placeholder, replace with URL. 
+					// If it was caption, text holds caption. We need strict separation for DB.
+					// DB: Content=URL, Caption=Text.
+					// But previously 'text' variable held both.
+					// Let's split strictly.
+					if med := v.Message.GetImageMessage(); med != nil {
+						content = webPath // Content = URL
+						// Caption is already in 'text' if we didn't overwrite it? 
+						// Wait, lines 397-402: text = img.GetCaption(). If text=="" text="[Image]".
+						savePath := filepath.Join(saveDir, fileName)
+						// Ensure unique name or overwrite? Timestamp added to image name above helps.
+						if err := os.WriteFile(savePath, mediaData, 0644); err == nil {
+							// Set Content to Web Path
+							content = fmt.Sprintf("/uploads/whatsapp/%s/%s", dateDir, fileName)
+							
+							// Auto-reply for confirmation (optional, keeping existing behavior)
+							//SendMessageViaClient(client, senderPhone, fmt.Sprintf("✅ File received: %s", fileName))
+						} else {
+							fmt.Printf("[WA Error] Failed to write file: %v\n", err)
+							content = "[Media Write Error]"
+						}
+					} else {
+						content = "[Media Download Failed]"
+					}
+				}
+
+				// Fallback for empty text (e.g. deleted message, status update, etc)
+				if content == "" && mediaType == "text" {
+					content = "[Empty Message / Unsupported Type]"
+				}
+
+				// LOG INCOMING
+				logWAMessage("incoming", senderPhone, myPhone, mediaType, content, caption, "received")
+
+				user, err := authorizeWAUser(phoneNumber)
+				// ... existing auth logic ...
+				if err != nil {
+					return
+				}
 				
-				if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
-					msg := ""
-					for _, node := range wfEngine {
-						// ... logic to find msg ...
-						if strings.EqualFold(node.ComponentName, "sendmessage") {
-							// Check input
-							if inputParams, ok := node.DataInputNode.(map[string]string); ok {
-								if m, ok := inputParams["message"]; ok && m != "" {
-									msg = ResolveParam(c, m)
-								}
+				// Create Request Context for Workflow
+				// For workflow, we usually process the command text. 
+				// If it's an image with caption, 'caption' is the command.
+				// If it's text, 'content' is the command.
+				cmdText := content
+				if mediaType != "text" {
+					cmdText = caption
+				}
+
+				if cmdText != "" && waDB != nil {
+					var reqCtx fasthttp.RequestCtx
+					reqCtx.Request.Header.SetMethod("POST")
+					reqCtx.Request.SetRequestURI("/whatsapp/aicommand")
+					reqCtx.PostArgs().Set("command", cmdText)
+					
+					app := fiber.New()
+					cCtx := app.AcquireCtx(&reqCtx)
+					defer app.ReleaseCtx(cCtx)
+					
+					// Setup Locals
+					cCtx.Locals("userid", user.Useraccessid)
+					cCtx.Locals("username", user.Username)
+					cCtx.Locals("db", waDB)
+					cCtx.Locals("wfEngine", []WorkflowEngine{})
+
+					// Callback using SPECIFIC CLIENT
+					lastSentMsg := ""
+					waCallback := func(msg string) {
+						if msg != "" {
+							recipient := senderPhone + "@s.whatsapp.net"
+							// Send via the client that received the message
+							if _, err := client.SendMessage(context.Background(), types.NewJID(senderPhone, types.DefaultUserServer), &waProto.Message{Conversation: proto.String(msg)}); err == nil {
+								fmt.Printf("[WA %s] Real-time sent to %s: %s\n", myPhone, recipient, msg)
+								logWAMessage("outgoing", myPhone, senderPhone, "text", msg, "", "sent")
+								lastSentMsg = msg
+							} else {
+								fmt.Printf("[WA %s] Failed send to %s: %v\n", myPhone, recipient, err)
+								logWAMessage("outgoing", myPhone, senderPhone, "text", msg, "", "failed")
 							}
 						}
 					}
 					
-					if msg != "" && msg != lastSentMsg {
-						waCallback(msg)
+					cCtx.Locals("wfExtras", map[string]interface{}{
+						"send_wa_callback": waCallback,
+					})
+					
+					params := map[string]interface{}{} 
+					cCtx.Locals("nestedWorkflow", false)
+					
+					if err := ExecuteFlow(cCtx, waDB, "aicommand", false, params); err == nil {
+						if wfEngine, ok := cCtx.Locals("wfEngine").([]WorkflowEngine); ok {
+							msg := ""
+							for _, node := range wfEngine {
+								if strings.EqualFold(node.ComponentName, "sendmessage") {
+									if inputParams, ok := node.DataInputNode.(map[string]string); ok {
+										if m, ok := inputParams["message"]; ok && m != "" {
+											msg = ResolveParam(cCtx, m)
+										}
+									}
+								}
+							}
+							
+							if msg != "" && msg != lastSentMsg {
+								waCallback(msg)
+							}
+						}
 					}
 				}
 			}
-		}
-	
-	case *events.PairSuccess:
-		// New Login!
-		newID := v.ID.ToNonAD()
-		newPhone := newID.User
-		fmt.Printf("[WA] Pair Success! New device: %s\n", newPhone)
-		
-		waClientsMutex.Lock()
-		waClients[newPhone] = client
-		waClientsMutex.Unlock()
-		
-		// Update persistent map in DB
-		updateDeviceStatus(newPhone, newID.String(), "Connected")
-		
-		// Re-register handler with correct phone
-		client.RemoveEventHandlers()
-		client.AddEventHandler(func(evt interface{}) {
-			eventHandler(client, newPhone, evt)
-		})
+		case *events.PairSuccess: 
+			// New Login!
+			newID := v.ID.ToNonAD()
+			newPhone := newID.User
+			fmt.Printf("[WA] Pair Success! New device: %s\n", newPhone)
+			
+			waClientsMutex.Lock()
+			waClients[newPhone] = client
+			waClientsMutex.Unlock()
+			
+			// Update persistent map in DB
+			updateDeviceStatus(newPhone, newID.String(), "Connected")
+			
+			// Re-register handler with correct phone
+			client.RemoveEventHandlers()
+			client.AddEventHandler(func(evt interface{}) {
+				eventHandler(client, newPhone, evt)
+			})
 	}
 }
 
@@ -524,6 +571,16 @@ func SendMessage(jidStr string, text string) error {
 	defer cancel()
 
 	_, err = client.SendMessage(ctx, jid, msg)
+	
+	status := "sent"
+	if err != nil { status = "failed" }
+	// We don't easily know "myPhone" here without reverse lookup or storing it in client struct wrapper.
+	// But we can approximate or leave sender empty.
+	// Actually, client.Store.ID contains our JID.
+	myJID := client.Store.ID.ToNonAD()
+	
+	logWAMessage("outgoing", myJID.User, jid.User, "text", text, "", status)
+	
 	return err
 }
 
@@ -797,8 +854,69 @@ func init() {
 func RegisterWARoutes(app *fiber.App) {
 	api := app.Group("/api/whatsapp")
 	api.Get("/devices", HandleGetDevices)
+	api.Get("/sessions", HandleGetWASessions)
+	api.Get("/logs", HandleGetWALogs)
 	api.Get("/qr", HandleGetWAQR)
 	api.Delete("/device/:phone", HandleDeleteDevice)
+}
+
+// HandleGetWALogs returns chat logs
+func HandleGetWALogs(c *fiber.Ctx) error {
+	if waDB == nil { return c.Status(500).JSON(fiber.Map{"error": "DB not init"}) }
+	
+	var logs []models.WhatsappMessage
+	// Pagination? Limit to last 100 for now
+	// Use Debug() to see the generated SQL
+	result := waDB.Debug().Order("created_at desc").Limit(100).Find(&logs)
+	if result.Error != nil {
+		fmt.Printf("[WA Log API Error] %v\n", result.Error)
+		return c.Status(500).JSON(fiber.Map{"error": result.Error.Error()})
+	}
+	
+	fmt.Printf("[WA Log API] Query found %d logs\n", len(logs))
+	if len(logs) > 0 {
+		fmt.Printf("[WA Log API] Sample - Content: '%s', Type: '%s'\n", logs[0].Content, logs[0].Type)
+	}
+	
+	return c.JSON(logs)
+}
+
+// HandleGetWASessions returns raw data from the SQLite session file
+func HandleGetWASessions(c *fiber.Ctx) error {
+	// Open the SQLite file in read-only mode, share cache
+	db, err := sql.Open("sqlite", "file:wa-session.db?mode=ro")
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": fmt.Sprintf("failed to open sqlite: %v", err)})
+	}
+	defer db.Close()
+	
+	// Query specific columns that definitely exist (exclude adv_account which caused error)
+	rows, err := db.Query("SELECT jid, registration_id, platform FROM whatsmeow_device")
+	if err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": fmt.Sprintf("query error: %v", err)})
+	}
+	defer rows.Close()
+	
+	var results []map[string]interface{}
+	
+	for rows.Next() {
+		var jid string
+		var regID int
+		var platform sql.NullString
+		
+		if err := rows.Scan(&jid, &regID, &platform); err != nil {
+			continue
+		}
+		
+		results = append(results, map[string]interface{}{
+			"jid": jid,
+			"registration_id": regID,
+			"platform": platform.String,
+			"has_adv": false, // Placeholder as column is missing
+		})
+	}
+	
+	return c.JSON(results)
 }
 
 // HandleGetDevices returns the list of devices

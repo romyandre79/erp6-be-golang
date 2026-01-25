@@ -38,6 +38,7 @@ func handleAI(ctx *WorkflowContext) error {
 		// Document context params
 		documentIDs      string
 		useAllDocuments  bool
+		filePaths        string
 	)
 
 	// Extract parameters
@@ -98,12 +99,26 @@ func handleAI(ctx *WorkflowContext) error {
 				documentIDs = val
 			}
 
-		case "use_all_documents", "usealldocuments":
+	case "use_all_documents", "usealldocuments":
 			if strings.ToLower(val) == "true" {
 				useAllDocuments = true
 			}
+		
+		case "file_paths", "filepaths":
+			if val != "" {
+				filePaths = val
+			}
 		}
 	}
+    
+    // Fallback: If parameters didn't have file_paths (not mapped in workflow), check form/extras directly
+    if filePaths == "" {
+        if val := ctx.FiberCtx.FormValue("file_paths"); val != "" {
+            filePaths = val
+        } else if val := ctx.FiberCtx.FormValue("file_path"); val != "" {
+            filePaths = val
+        }
+    }
 
 	// Default user_id from context if not provided
 	if userID == "" {
@@ -128,7 +143,7 @@ func handleAI(ctx *WorkflowContext) error {
 	fmt.Printf("[CompAI DEBUG] Config Parsed -> Provider: '%s', Model: '%s', Token Set: %v\n", provider, model, token != "")
 
 	// Pass document context to processAI
-	result, err := processAI(command, conversationState, dbDriver, userID, ctx.DB, aiConfig, documentIDs, useAllDocuments)
+	result, err := processAI(command, conversationState, dbDriver, userID, ctx.DB, aiConfig, documentIDs, useAllDocuments, filePaths)
 	if err != nil {
 		return err
 	}
@@ -363,17 +378,17 @@ func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *Workflow
 	return err
 }
 
-func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config models.AIConfig, documentIDs string, useAllDocuments bool) (map[string]interface{}, error) {
+func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config models.AIConfig, documentIDs string, useAllDocuments bool, filePaths string) (map[string]interface{}, error) {
 	fmt.Printf("[CompAI] ========== processAI START ==========\n")
 	fmt.Printf("[CompAI] Command received: '%s'\n", command)
 	fmt.Printf("[CompAI] User ID: %s\n", userID)
 	fmt.Printf("[CompAI] Document IDs param: '%s'\n", documentIDs)
+	fmt.Printf("[CompAI] File Paths param: '%s'\n", filePaths)
 	fmt.Printf("[CompAI] Use All Documents param: %v\n", useAllDocuments)
 	fmt.Printf("[CompAI] ==========================================\n")
 
 	var state models.AIConversationState
 
-	// Parse existing state or create new one
 	// Parse existing state or create new one
 	if stateJSON != "" && stateJSON != "{}" {
 		if err := json.Unmarshal([]byte(stateJSON), &state); err != nil {
@@ -394,6 +409,26 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config 
 		Content:   command,
 		Timestamp: time.Now().Unix(),
 	})
+	
+	// Update Document Context in State
+	if documentIDs != "" {
+		// New documents uploaded -> Update state
+		state.DocumentIDs = documentIDs
+		fmt.Printf("[CompAI] Updated state with new Document IDs: %s\n", state.DocumentIDs)
+	} else if state.DocumentIDs != "" {
+		// No new docs, but state has them -> Use state docs
+		documentIDs = state.DocumentIDs
+		fmt.Printf("[CompAI] Using persistet Document IDs from state: %s\n", state.DocumentIDs)
+	}
+
+	// Update File Context in State
+	if filePaths != "" {
+		state.FilePaths = filePaths
+		fmt.Printf("[CompAI] Updated state with new File Paths: %s\n", state.FilePaths)
+	} else if state.FilePaths != "" {
+		filePaths = state.FilePaths
+		fmt.Printf("[CompAI] Using persisted File Paths from state: %s\n", state.FilePaths)
+	}
 
 	lowerCmd := strings.ToLower(command)
 
@@ -434,11 +469,56 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config 
 
 	// Continue existing conversation
 	if state.EntityType != "" {
-		return runConversationStep(command, state, dbDriver, userID, "", "", db)
+		// handle specific state actions if needed
+	}
+
+    // Special Command: Get History
+    if strings.TrimSpace(lowerCmd) == "get_history" || strings.TrimSpace(lowerCmd) == "get history" {
+        fmt.Printf("[CompAI] Returning conversation history for user %s\n", userID)
+        
+        // Map history to simple format if needed, or return as is
+        var history []map[string]interface{}
+        for _, msg := range state.History {
+            sender := "user"
+            if msg.Role == "assistant" {
+                sender = "ai"
+            }
+            history = append(history, map[string]interface{}{
+                "text": msg.Content,
+                "sender": sender,
+                "timestamp": msg.Timestamp,
+            })
+        }
+        
+        return map[string]interface{}{
+            "history": history,
+        }, nil
+    }
+
+	if state.EntityType != "" {
+		return runConversationStep(command, state, dbDriver, userID, "", "", db, filePaths)
+	}
+
+	// Get all available commands/entities
+	availableEntities := getAvailableEntities(db)
+	fmt.Printf("[CompAI] Checking Triggers for command: '%s' (Entities: %d)\n", lowerCmd, len(availableEntities))
+
+	// Triggers (Prioritized as requested)
+	for _, entity := range availableEntities {
+		flow, err := getQuestionFlow(db, entity.Name)
+		if err == nil && len(flow.Triggers) > 0 {
+			// fmt.Printf("[CompAI] Checking entity '%s' triggers: %v\n", entity.Name, flow.Triggers)
+			for _, trigger := range flow.Triggers {
+				if strings.Contains(lowerCmd, strings.ToLower(trigger)) {
+					fmt.Printf("[CompAI] MATCHED Trigger '%s' for entity '%s'\n", trigger, entity.Name)
+					// Found trigger, force new conversation
+					return runConversationStep(command, models.AIConversationState{}, dbDriver, userID, entity.Name, "", db, filePaths)
+				}
+			}
+		}
 	}
 
 	// New Conversation Logic
-	availableEntities := getAvailableEntities(db)
 	matchedEntity := ""
 	initialArg := ""
 	isListCommand := false
@@ -494,20 +574,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config 
 			return result, nil
 		}
 		// Create
-		return runConversationStep(command, state, dbDriver, userID, matchedEntity, initialArg, db)
-	}
-
-	// Triggers
-	for _, entity := range availableEntities {
-		flow, err := getQuestionFlow(db, entity.Name)
-		if err == nil && len(flow.Triggers) > 0 {
-			for _, trigger := range flow.Triggers {
-				if strings.Contains(lowerCmd, strings.ToLower(trigger)) {
-					// Found trigger, force new conversation
-					return runConversationStep(command, models.AIConversationState{}, dbDriver, userID, entity.Name, "", db)
-				}
-			}
-		}
+		return runConversationStep(command, state, dbDriver, userID, matchedEntity, initialArg, db, filePaths)
 	}
 
 	
@@ -518,11 +585,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config 
 	if !useAllDocuments && documentIDs == "" {
 		lowerCmd := strings.ToLower(command)
 		documentKeywords := []string{
-			"document", "manual", "file", "pdf", "docx", "uploaded", 
-			"user manual", "panduan", "dokumen", "petunjuk",
-			"akun", "jenis", "master", "cara", "how to", "bagaimana",
-			"check", "cek", "lihat", "baca", "read",
-			"jelaskan", "menggunakan", "gunakan", "pakai",
+			"jelaskan","how","bagaimana",
 		}
 		
 		fmt.Printf("[CompAI] Checking command for document keywords: '%s'\n", lowerCmd)
@@ -552,7 +615,7 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 	fmt.Printf("[CompAI] ==========================================\n")
 	
 	// 1. Get Schema Context
-	schemaTables, err := ReverseEngineerDatabase(db)
+	/*schemaTables, err := ReverseEngineerDatabase(db)
 	if err != nil {
 		fmt.Printf("[CompAI] Warning: Failed to get schema: %v\n", err)
 	}
@@ -565,7 +628,7 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 		for _, c := range t.Columns {
 			schemaSummary.WriteString(fmt.Sprintf("  - %s (%s)\n", c.Name, c.Type))
 		}
-	}
+	}*/
 
 	// 1.5. Get Document Context
 	var documentContext strings.Builder
@@ -634,68 +697,76 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 	var promptBuilder strings.Builder
 	
 	// If documents are loaded, prioritize them and HIDE database schema
+	//if documentContext.Len() > 0 {
 	if documentContext.Len() > 0 {
-		promptBuilder.WriteString("You are a document reader assistant and a helpful assistant for an ERP System. ")
-		promptBuilder.WriteString("Your name Siti Supri Suprajono a Capella AI Assistant")
-		promptBuilder.WriteString("Your ONLY job is to answer questions based on the documents provided below.\n\n")
-		promptBuilder.WriteString("CRITICAL RULES:\n")
-		promptBuilder.WriteString("1. You MUST answer ONLY using information from the documents below\n")
-		promptBuilder.WriteString("2. You MUST NOT use your general knowledge or training data\n")
-		promptBuilder.WriteString("3. You MUST quote or paraphrase directly from the document text\n")
-		promptBuilder.WriteString("4. DO NOT make assumptions or add information not in the documents\n")
-		promptBuilder.WriteString("5. DO NOT explain concepts beyond what is written in the documents\n\n")
-		promptBuilder.WriteString("6. If question in English, answer it in English Formal\n\n")
-		promptBuilder.WriteString("7. If question in Indonesia, answer it in Indonesia\n\n")
-		promptBuilder.WriteString("8. If question not in English or Indonesia, you must say: 'I can not understand. Please use Indonesian or English'\n\n")
-		promptBuilder.WriteString("9. Do not combine Indonesian and English in one statement\n\n")
-		promptBuilder.WriteString("10. If the answer is NOT in the documents, you MUST say: 'Information does not exist, do you mind to contact my friend' or 'Informasi tersebut tidak ada dalam dokumen yang diunggah' depend language user say\n")
-		promptBuilder.WriteString(documentContext.String())
-		//promptBuilder.WriteString(schemaSummary.String())
-		promptBuilder.WriteString("\n**Your Task:**\n")
-		promptBuilder.WriteString("Read the documents above carefully and answer the user's question using ONLY the information provided in these documents.\n")
-		//promptBuilder.WriteString("If you use information from the documents, reference which document it came from.\n\n")
-	} else {
-		// No documents, use database-focused prompt
-		promptBuilder.WriteString("You are a helpful database assistant for an ERP system. ")
-		promptBuilder.WriteString("You have access to the following database schema:\n")
-		promptBuilder.WriteString(schemaSummary.String())
-		promptBuilder.WriteString("\n\nAnswer the user's question. If you need to query the database, output the SQL query in valid JSON format like: {\"action\": \"query\", \"sql\": \"SELECT ...\"}. \n")
-		promptBuilder.WriteString("If you can answer without querying (or have the result), just provide the answer.\n\n")
-	}
-	
+		promptBuilder.WriteString(`
+You are Siti, Capella AI Assistant.
+You are a helpful assistant who uses the provided documents to answer questions.
 
-	// Add History (but SKIP if documents are loaded - we want fresh document-only responses)
-	if documentContext.Len() == 0 {
-		for _, msg := range state.History {
+LANGUAGE RULES:
+- Detect the user's language and respond in the same language.
+- If mixed language, use the dominant language.
+
+INSTRUCTIONS:
+1. If the user greets you (e.g., "halo", "hi", "pagi"), answer politely and offer help. do NOT look into documents for greetings.
+2. If the user asks a question, answer ONLY using information from the documents below.
+3. You MUST NOT use general knowledge if information can be found in documents.
+4. If information for a specific question does NOT exist in the documents:
+   - English: "Information does not exist in the uploaded documents."
+   - Indonesian: "Informasi tersebut tidak ada dalam dokumen yang diunggah."
+   - Do NOT make up an answer.
+
+FORMAT RULES:
+- Be concise.
+- For factual answers based on documents, cite the source if possible.
+- For greetings, just be polite.
+
+===== DOCUMENTS START =====
+`)
+		promptBuilder.WriteString(documentContext.String())
+		promptBuilder.WriteString(`
+===== DOCUMENTS END =====
+
+Your task:
+Answer the user's input/question.
+If it is a greeting, be polite.
+If it is a question, use the documents above.
+
+User Input: ` + command + `
+Assistant:`)
+	} else {
+		// No documents - General Assistant Mode
+		promptBuilder.WriteString(`
+You are Siti, Capella AI Assistant.
+You are a helpful ERP assistant.
+
+You have access to the ERP database and can help with general inquiries or database questions.
+If asked about specific data, you can generate SQL queries (format: {"action": "query", "sql": "..."}).
+
+LANGUAGE RULES:
+- Respond in the same language as the user.
+`)
+	// Add conversation history for context in General Mode
+	if len(state.History) > 0 {
+		promptBuilder.WriteString("\nConversation History:\n")
+		// Limit history to last 10 messages
+		startIdx := 0
+		if len(state.History) > 10 {
+			startIdx = len(state.History) - 10
+		}
+		for i := startIdx; i < len(state.History); i++ {
+			msg := state.History[i]
 			role := "User"
 			if msg.Role == "assistant" {
 				role = "Assistant"
 			}
 			promptBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
 		}
-		promptBuilder.WriteString("Assistant:")
-	} else {
-		// When documents are loaded, ignore conversation history and use reading comprehension format
-		fmt.Printf("[CompAI] Skipping conversation history - using document-only mode\n")
-		
-		// Add the user's question as part of the reading comprehension task
-		promptBuilder.WriteString("\n**Question to Answer:**\n")
-		promptBuilder.WriteString(command)
-		promptBuilder.WriteString("\n\n**How to Answer:**\n")
-		promptBuilder.WriteString("1. Find the relevant section in the document above\n")
-		promptBuilder.WriteString("2. Copy or paraphrase EXACTLY what the document says\n")
-		promptBuilder.WriteString("3. Do NOT add explanations, context, or information not in the document\n")
-		promptBuilder.WriteString("4. If the document doesn't contain the answer, say: 'Dokumen tidak membahas hal tersebut'\n\n")
-		promptBuilder.WriteString("**Example of CORRECT answer:**\n")
-		promptBuilder.WriteString("'Menurut dokumen, langkah-langkahnya adalah: 1. Click Accounting Menu, 2. Click Sub Menu Account Type'\n\n")
-		promptBuilder.WriteString("**Example of WRONG answer:**\n")
-		promptBuilder.WriteString("'Master Jenis Akun berfungsi sebagai kerangka untuk Bagan Akun...' (This adds information not in the document)\n\n")
-		promptBuilder.WriteString("**Your Answer (based ONLY on the document):**\n")
+	}
+	promptBuilder.WriteString("\nUser: " + command + "\nAssistant:")
 	}
 	
 	fullPrompt := promptBuilder.String()
-
-	// 3. Call LLM (Using ENV for config for now, or default)
 
 	// 3. Call LLM (Loop for Agentic behavior - max 5 turns)
 	maxTurns := 5
@@ -767,7 +838,7 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 		var loopPromptBuilder strings.Builder
 		
 		// CRITICAL FIX: Only rebuild with database schema if documents are NOT loaded
-		if documentContext.Len() == 0 {
+		/*if documentContext.Len() == 0 {
 			// Database mode
 			loopPromptBuilder.WriteString("You are a helpful database assistant for an ERP system. ")
 			loopPromptBuilder.WriteString("You have access to the following database schema:\n")
@@ -786,10 +857,10 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 				loopPromptBuilder.WriteString(fmt.Sprintf("%s: %s\n", role, msg.Content))
 			}
 			loopPromptBuilder.WriteString("Assistant:")
-		} else {
+		} else {*/
 			// Document mode - use the fullPrompt which already has document context
 			loopPromptBuilder.WriteString(fullPrompt)
-		}
+		//}
 		
 		currentPrompt := loopPromptBuilder.String()
 
@@ -1105,7 +1176,7 @@ func delegateToLLM(command string, state models.AIConversationState, driver, use
 	}, nil
 }
 
-func runConversationStep(command string, state models.AIConversationState, dbDriver, userID, matchedEntity, initialArg string, db *gorm.DB) (map[string]interface{}, error) {
+func runConversationStep(command string, state models.AIConversationState, dbDriver, userID, matchedEntity, initialArg string, db *gorm.DB, filePaths string) (map[string]interface{}, error) {
 	lowerCmd := strings.ToLower(command)
 
 	if lowerCmd == "exit" || lowerCmd == "cancel" || lowerCmd == "batal" {
@@ -1162,6 +1233,22 @@ func runConversationStep(command string, state models.AIConversationState, dbDri
 			for k, v := range state.CollectedData {
 				result[k] = v
 			}
+			
+			// Inject file paths if available (handle execute with file)
+			if filePaths != "" {
+				// Strategy: If we have file paths, we should probably assign them to the LAST question if it matches?
+				// Or add as a generic "files" parameter?
+				// Let's add as "file_paths" and "files"
+				result["file_paths"] = filePaths
+				result["files"] = filePaths
+				
+				// AND if the flow has questions, try to find a file-like question to populate?
+				// Or just rely on collected data having it (from previous steps).
+				// But if user did "execute" AND uploaded a file simultaneously (single step), 
+				// we should try to assign it to the last unanswered question?
+				// Or just trust they answered it before?
+				// The requirement "upload after finish" implies we attach it to the final result.
+			}
 
 			// Unmarshal query if JSON
 			if strings.HasPrefix(strings.TrimSpace(query), "{") {
@@ -1213,9 +1300,20 @@ func runConversationStep(command string, state models.AIConversationState, dbDri
 		// But Wait: runConversationStep is called with `command`.
 		// If matchedEntity != "" (New conversation), we handled initialArg.
 		// If matchedEntity == "" (Continuing), `command` IS the answer.
+		// Only capture if we didn't just jump here via initialArg in this same call
+		// But Wait: runConversationStep is called with `command`.
+		// If matchedEntity != "" (New conversation), we handled initialArg.
+		// If matchedEntity == "" (Continuing), `command` IS the answer.
 		if matchedEntity == "" {
 			prevQuestion := flow.Questions[state.CurrentStep-1]
-			state.CollectedData[prevQuestion.Key] = command
+			
+			// PRIORITIZE FILE PATH AS ANSWER
+			if filePaths != "" {
+				state.CollectedData[prevQuestion.Key] = filePaths
+				fmt.Printf("[CompAI] Using FilePath as answer for '%s': %s\n", prevQuestion.Key, filePaths)
+			} else {
+				state.CollectedData[prevQuestion.Key] = command
+			}
 		}
 	}
 
@@ -1317,7 +1415,26 @@ func getQuestionFlow(db *gorm.DB, entityType string) (*models.AIQuestionFlow, er
 
 	json.Unmarshal([]byte(cmd.Params), &flow.Params)
 	json.Unmarshal([]byte(cmd.Defaults), &flow.Defaults)
-	json.Unmarshal([]byte(cmd.Triggers), &flow.Triggers)
+	// Handle Triggers (Robust Parsing)
+	if err := json.Unmarshal([]byte(cmd.Triggers), &flow.Triggers); err != nil {
+		// Failed to parse as JSON, treat as comma-separated string
+		// Remove brackets if they exist but were malformed
+		cleaned := strings.Trim(strings.TrimSpace(cmd.Triggers), "[]")
+		parts := strings.Split(cleaned, ",")
+		for _, p := range parts {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				flow.Triggers = append(flow.Triggers, trimmed)
+			}
+		}
+		// Also add the command Name itself as a trigger if not present
+		flow.Triggers = append(flow.Triggers, cmd.Name)
+		fmt.Printf("[CompAI Debug] Parsed triggers from non-JSON: %v\n", flow.Triggers)
+	} else {
+        // Even if JSON parse success, ensure Name is included? 
+        // Maybe not, explicit triggers usually override name.
+        // But let's log it.
+        fmt.Printf("[CompAI Debug] Parsed triggers from JSON: %v\n", flow.Triggers)
+    }
 
 	// Defaults for safety
 	if flow.Defaults == nil {

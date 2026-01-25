@@ -32,6 +32,7 @@ func handleDocument(ctx *WorkflowContext) error {
 		action       string
 		fileField    string
 		documentID   string
+		filePath     string // [NEW] Support local file path
 		maxFileSize  int64 = 10 * 1024 * 1024 // 10MB default limit
 	)
 
@@ -42,6 +43,9 @@ func handleDocument(ctx *WorkflowContext) error {
 			action = strings.ToLower(strings.TrimSpace(p.CompValue))
 		case "file_field", "filefield":
 			fileField = strings.TrimSpace(p.CompValue)
+		case "file_path", "filepath", "file":
+			// Allow direct file path input
+			filePath = ResolveParam(c, strings.TrimSpace(p.CompValue))
 		case "document_id", "documentid":
 			documentID = ResolveParam(c, strings.TrimSpace(p.CompValue))
 		case "max_file_size", "maxfilesize":
@@ -61,7 +65,7 @@ func handleDocument(ctx *WorkflowContext) error {
 
 	switch action {
 	case "upload_and_extract":
-		return handleUploadAndExtract(ctx, fileField, documentID, userID, maxFileSize)
+		return handleUploadAndExtract(ctx, fileField, filePath, documentID, userID, maxFileSize)
 	case "list":
 		return handleListDocuments(ctx, userID)
 	case "get":
@@ -74,13 +78,25 @@ func handleDocument(ctx *WorkflowContext) error {
 	}
 }
 
-func handleUploadAndExtract(ctx *WorkflowContext, fileField string, documentID string, userID int, maxFileSize int64) error {
+func handleUploadAndExtract(ctx *WorkflowContext, fileField, inputFilePath, documentID string, userID int, maxFileSize int64) error {
 	c := ctx.FiberCtx
 	db := ctx.DB
 
-	if fileField == "" {
-		helpers.FailResponse(c, fiber.StatusBadRequest, "MISSING_PARAMETER", "file_field is required for upload_and_extract")
-		return fmt.Errorf("file_field parameter is required")
+	// Fallback: Check if file path is available in Extras (from AI or previous steps)
+	if inputFilePath == "" {
+		if val, ok := ctx.Extras["file_paths"]; ok && val != nil && val.(string) != "" {
+			inputFilePath = val.(string)
+			fmt.Printf("[CompDocument] Auto-detected input file path from Extras['file_paths']: %s\n", inputFilePath)
+		} else if val, ok := ctx.Extras["file"]; ok && val != nil && val.(string) != "" {
+            // Check if 'file' extra is actually a path string
+            inputFilePath = val.(string)
+            fmt.Printf("[CompDocument] Auto-detected input file path from Extras['file']: %s\n", inputFilePath)
+        }
+	}
+
+	if fileField == "" && inputFilePath == "" {
+		helpers.FailResponse(c, fiber.StatusBadRequest, "MISSING_PARAMETER", "file_field or file_path is required for upload_and_extract")
+		return fmt.Errorf("file_field or file_path parameter is required")
 	}
 
 	// Check if this is an UPDATE operation
@@ -104,91 +120,124 @@ func handleUploadAndExtract(ctx *WorkflowContext, fileField string, documentID s
 	var fileSize int64
 	var contentType string
 
-	// Try to get file from multipart form first
-	file, err := c.FormFile(fileField)
-	if err == nil {
-		// Multipart file upload
-		fmt.Printf("[CompDocument] Processing multipart file upload\n")
+	// 1. Try Input File Path (Local File)
+	if inputFilePath != "" {
+		fmt.Printf("[CompDocument] Processing local file path: %s\n", inputFilePath)
 		
-		// Open the file
-		fileHandle, err := file.Open()
+		// Open local file
+		f, err := os.Open(inputFilePath)
 		if err != nil {
-			helpers.FailResponse(c, fiber.StatusInternalServerError, "FILE_READ_ERROR", "Failed to read uploaded file")
+			helpers.FailResponse(c, fiber.StatusBadRequest, "FILE_NOT_FOUND", "Failed to open local file: "+inputFilePath)
 			return err
 		}
-		defer fileHandle.Close()
+		defer f.Close()
 
 		// Read file data
-		fileData, err = io.ReadAll(fileHandle)
+		fileData, err = io.ReadAll(f)
 		if err != nil {
-			helpers.FailResponse(c, fiber.StatusInternalServerError, "FILE_READ_ERROR", "Failed to read file content")
+			helpers.FailResponse(c, fiber.StatusInternalServerError, "FILE_READ_ERROR", "Failed to read local file")
 			return err
 		}
 
-		fileName = file.Filename
-		fileSize = file.Size
-		contentType = file.Header.Get("Content-Type")
-	} else {
-		// Try to get base64 encoded file from form field
-		fmt.Printf("[CompDocument] Multipart file not found, checking for base64 data\n")
+		info, _ := f.Stat()
+		fileName = filepath.Base(inputFilePath)
+		fileSize = info.Size()
+		// Content type detection (basic)
+		ext := strings.ToLower(filepath.Ext(fileName))
+		if ext == ".pdf" {
+			contentType = "application/pdf"
+		} else if ext == ".docx" {
+			contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		}
 		
-		base64Data := c.FormValue(fileField)
-		if base64Data == "" {
-			helpers.FailResponse(c, fiber.StatusBadRequest, "FILE_NOT_FOUND", "No file uploaded in field: "+fileField)
-			return fmt.Errorf("no file data found in field: %s", fileField)
-		}
+	} else {
+		// 2. Try Multipart Form
+		file, err := c.FormFile(fileField)
+		if err == nil {
+			// Multipart file upload
+			fmt.Printf("[CompDocument] Processing multipart file upload\n")
+			
+			// Open the file
+			fileHandle, err := file.Open()
+			if err != nil {
+				helpers.FailResponse(c, fiber.StatusInternalServerError, "FILE_READ_ERROR", "Failed to read uploaded file")
+				return err
+			}
+			defer fileHandle.Close()
 
-		// Parse base64 data (format: data:mime/type;base64,<data>)
-		var base64Content string
-		if strings.HasPrefix(base64Data, "data:") {
-			// Extract MIME type and base64 content
-			parts := strings.SplitN(base64Data, ",", 2)
-			if len(parts) != 2 {
-				helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_BASE64", "Invalid base64 data format")
-				return fmt.Errorf("invalid base64 format")
+			// Read file data
+			fileData, err = io.ReadAll(fileHandle)
+			if err != nil {
+				helpers.FailResponse(c, fiber.StatusInternalServerError, "FILE_READ_ERROR", "Failed to read file content")
+				return err
 			}
 
-			// Extract MIME type from data:mime/type;base64
-			mimeTypePart := parts[0]
-			if strings.Contains(mimeTypePart, ":") && strings.Contains(mimeTypePart, ";") {
-				contentType = strings.TrimPrefix(strings.Split(mimeTypePart, ";")[0], "data:")
-			}
-
-			base64Content = parts[1]
+			fileName = file.Filename
+			fileSize = file.Size
+			contentType = file.Header.Get("Content-Type")
 		} else {
-			// Plain base64 without data URI prefix
-			base64Content = base64Data
-		}
-
-		// Decode base64
-		var decodeErr error
-		fileData, decodeErr = base64.StdEncoding.DecodeString(base64Content)
-		if decodeErr != nil {
-			helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_BASE64", "Failed to decode base64 data")
-			return fmt.Errorf("base64 decode error: %w", decodeErr)
-		}
-
-		fileSize = int64(len(fileData))
-
-		// Get filename from separate field (file_filename)
-		fileName = c.FormValue(fileField + "_filename")
-		if fileName == "" {
-			// Generate default filename based on content type
-			ext := ".bin"
-			if contentType != "" {
-				switch contentType {
-				case "application/pdf":
-					ext = ".pdf"
-				case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-					ext = ".docx"
-				case "application/msword":
-					ext = ".doc"
-				}
+			// 3. Try Base64 Data
+			// Try to get base64 encoded file from form field
+			fmt.Printf("[CompDocument] Multipart file not found, checking for base64 data\n")
+			
+			base64Data := c.FormValue(fileField)
+			if base64Data == "" {
+				helpers.FailResponse(c, fiber.StatusBadRequest, "FILE_NOT_FOUND", "No file uploaded in field: "+fileField)
+				return fmt.Errorf("no file data found in field: %s", fileField)
 			}
-			fileName = fmt.Sprintf("document_%d%s", time.Now().Unix(), ext)
-		}
 
-		fmt.Printf("[CompDocument] Decoded base64 file: %s (Size: %d bytes)\n", fileName, fileSize)
+			// Parse base64 data (format: data:mime/type;base64,<data>)
+			var base64Content string
+			if strings.HasPrefix(base64Data, "data:") {
+				// Extract MIME type and base64 content
+				parts := strings.SplitN(base64Data, ",", 2)
+				if len(parts) != 2 {
+					helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_BASE64", "Invalid base64 data format")
+					return fmt.Errorf("invalid base64 format")
+				}
+
+				// Extract MIME type from data:mime/type;base64
+				mimeTypePart := parts[0]
+				if strings.Contains(mimeTypePart, ":") && strings.Contains(mimeTypePart, ";") {
+					contentType = strings.TrimPrefix(strings.Split(mimeTypePart, ";")[0], "data:")
+				}
+
+				base64Content = parts[1]
+			} else {
+				// Plain base64 without data URI prefix
+				base64Content = base64Data
+			}
+
+			// Decode base64
+			var decodeErr error
+			fileData, decodeErr = base64.StdEncoding.DecodeString(base64Content)
+			if decodeErr != nil {
+				helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_BASE64", "Failed to decode base64 data")
+				return fmt.Errorf("base64 decode error: %w", decodeErr)
+			}
+
+			fileSize = int64(len(fileData))
+
+			// Get filename from separate field (file_filename)
+			fileName = c.FormValue(fileField + "_filename")
+			if fileName == "" {
+				// Generate default filename based on content type
+				ext := ".bin"
+				if contentType != "" {
+					switch contentType {
+					case "application/pdf":
+						ext = ".pdf"
+					case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+						ext = ".docx"
+					case "application/msword":
+						ext = ".doc"
+					}
+				}
+				fileName = fmt.Sprintf("document_%d%s", time.Now().Unix(), ext)
+			}
+
+			fmt.Printf("[CompDocument] Decoded base64 file: %s (Size: %d bytes)\n", fileName, fileSize)
+		}
 	}
 
 	fmt.Printf("[CompDocument] Validating file: %s (Size: %d bytes)\n", fileName, fileSize)
@@ -276,17 +325,18 @@ func handleUploadAndExtract(ctx *WorkflowContext, fileField string, documentID s
 
 	// Extract text based on file type
 	var extractedText string
+	var extractErr error
 	if fileType == "pdf" {
-		extractedText, err = extractTextFromPDF(savePath)
+		extractedText, extractErr = extractTextFromPDF(savePath)
 	} else {
-		extractedText, err = extractTextFromDOCX(savePath)
+		extractedText, extractErr = extractTextFromDOCX(savePath)
 	}
 
-	if err != nil {
+	if extractErr != nil {
 		// Clean up file if extraction fails
 		os.Remove(savePath)
 		helpers.FailResponse(c, fiber.StatusInternalServerError, "EXTRACTION_ERROR", "Failed to extract text from document")
-		return err
+		return extractErr
 	}
 
 	fmt.Printf("[CompDocument] Extracted %d characters of text\n", len(extractedText))
@@ -374,9 +424,10 @@ func handleUploadAndExtract(ctx *WorkflowContext, fileField string, documentID s
 	ctx.Extras["document_filename"] = document.FileName
 
 	// Update workflow engine result
-	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
-	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
-	c.Locals("wfEngine", wfEngine)
+	if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
+		wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
+		c.Locals("wfEngine", wfEngine)
+	}
 
 	helpers.SuccessResponse(c, "DOCUMENT_UPLOADED", responseData)
 	return nil
@@ -413,9 +464,10 @@ func handleListDocuments(ctx *WorkflowContext, userID int) error {
 	}
 
 	// Update workflow engine result
-	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
-	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
-	c.Locals("wfEngine", wfEngine)
+	if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
+		wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
+		c.Locals("wfEngine", wfEngine)
+	}
 
 	helpers.SuccessResponse(c, "DOCUMENTS_RETRIEVED", responseData)
 	return nil
@@ -458,9 +510,10 @@ func handleGetDocument(ctx *WorkflowContext, documentID string, userID int) erro
 	ctx.Extras["document_filename"] = document.FileName
 
 	// Update workflow engine result
-	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
-	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
-	c.Locals("wfEngine", wfEngine)
+	if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
+		wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
+		c.Locals("wfEngine", wfEngine)
+	}
 
 	helpers.SuccessResponse(c, "DOCUMENT_RETRIEVED", responseData)
 	return nil
@@ -503,9 +556,10 @@ func handleDeleteDocument(ctx *WorkflowContext, documentID string, userID int) e
 	}
 
 	// Update workflow engine result
-	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
-	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
-	c.Locals("wfEngine", wfEngine)
+	if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
+		wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
+		c.Locals("wfEngine", wfEngine)
+	}
 
 	helpers.SuccessResponse(c, "DOCUMENT_DELETED", responseData)
 	return nil
