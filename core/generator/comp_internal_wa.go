@@ -3,6 +3,7 @@ package generator
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -386,48 +387,38 @@ func eventHandler(client *whatsmeow.Client, myPhone string, evt interface{}) {
 				mediaType = "unknown"
 			}
 
-			// Save media file if exists
-			if mediaType != "" {
+			// Save media file if exists (and not text)
+			if mediaType != "" && mediaType != "text" {
 				if mediaErr == nil {
 					dateDir := time.Now().Format("2006-01-02")
 					saveDir := fmt.Sprintf("./public/uploads/whatsapp/%s", dateDir)
 					os.MkdirAll(saveDir, 0755)
 					savePath := filepath.Join(saveDir, fileName)
-					os.WriteFile(savePath, mediaData, 0644)
 					
-					// Set Content to Web Path for frontend display
-					// Ensure leading slash
-					webPath := fmt.Sprintf("/uploads/whatsapp/%s/%s", dateDir, fileName)
-					// If it was just [Image] placeholder, replace with URL. 
-					// If it was caption, text holds caption. We need strict separation for DB.
-					// DB: Content=URL, Caption=Text.
-					// But previously 'text' variable held both.
-					// Let's split strictly.
-					if med := v.Message.GetImageMessage(); med != nil {
-						content = webPath // Content = URL
-						// Caption is already in 'text' if we didn't overwrite it? 
-						// Wait, lines 397-402: text = img.GetCaption(). If text=="" text="[Image]".
-						savePath := filepath.Join(saveDir, fileName)
-						// Ensure unique name or overwrite? Timestamp added to image name above helps.
-						if err := os.WriteFile(savePath, mediaData, 0644); err == nil {
-							// Set Content to Web Path
-							content = fmt.Sprintf("/uploads/whatsapp/%s/%s", dateDir, fileName)
-							
-							// Auto-reply for confirmation (optional, keeping existing behavior)
-							//SendMessageViaClient(client, senderPhone, fmt.Sprintf("✅ File received: %s", fileName))
-						} else {
-							fmt.Printf("[WA Error] Failed to write file: %v\n", err)
-							content = "[Media Write Error]"
-						}
+					// Save File
+					if err := os.WriteFile(savePath, mediaData, 0644); err == nil {
+						// Set Content to Web Path for frontend display
+						webPath := fmt.Sprintf("/uploads/whatsapp/%s/%s", dateDir, fileName)
+						content = webPath
+						
+						// Image specific handling (if needed in future, currently just setting content)
+						if med := v.Message.GetImageMessage(); med != nil {
+							// If image had specific logic, place here. 
+							// Previously it double-saved. Removed.
+						} 
 					} else {
-						content = "[Media Download Failed]"
+						fmt.Printf("[WA Error] Failed to write file: %v\n", err)
+						content = "[Media Write Error]"
 					}
+				} else {
+					content = "[Media Download Failed]"
 				}
+			}
 
-				// Fallback for empty text (e.g. deleted message, status update, etc)
-				if content == "" && mediaType == "text" {
-					content = "[Empty Message / Unsupported Type]"
-				}
+			// Fallback for empty text (e.g. deleted message, status update, etc)
+			if content == "" && mediaType == "text" {
+				content = "[Empty Message / Unsupported Type]"
+			}
 
 				// LOG INCOMING
 				logWAMessage("incoming", senderPhone, myPhone, mediaType, content, caption, "received")
@@ -445,6 +436,11 @@ func eventHandler(client *whatsmeow.Client, myPhone string, evt interface{}) {
 				cmdText := content
 				if mediaType != "text" {
 					cmdText = caption
+					// If media exists but no caption, force a trigger so AI receives the file context
+					// usage: use valid file path so CompDocument can read it if mapped to 'file'
+					if cmdText == "" && mediaType != "" {
+						cmdText = fmt.Sprintf("./public%s", content)
+					}
 				}
 
 				if cmdText != "" && waDB != nil {
@@ -485,12 +481,57 @@ func eventHandler(client *whatsmeow.Client, myPhone string, evt interface{}) {
 					})
 					
 					params := map[string]interface{}{} 
+					
+					// 1. Get Conversation State
+					stateJSON := getWAUserState(fmt.Sprintf("%d", user.Useraccessid))
+					params["conversation_state"] = stateJSON
+
+					// 2. Pass File Paths if media
+					if mediaType != "text" && mediaType != "" {
+						// content contains the web path (e.g. /uploads/whatsapp/...)
+						// We need absolute path or relative to root? 
+						// comp_ai.go expects file paths.
+						// Let's pass the web path, assuming comp_ai can handle it or we convert to local.
+						// Actually comp_ai uses it to read file content potentially. 
+						// But for now, let's pass what we have.
+						// Better: Pass the LOCAL path we just wrote.
+						// But we constructed local path inside the media block above. 
+						// Reconstruct it or assume 'content' is fine? 
+						// 'content' is "/uploads/whatsapp/..." (Web Path)
+						// Local path is "./public" + content.
+						localPath := fmt.Sprintf("./public%s", content)
+						params["file_paths"] = localPath
+						fmt.Printf("[WA] Sending file to AI: %s\n", localPath)
+					}
+
 					cCtx.Locals("nestedWorkflow", false)
 					
 					if err := ExecuteFlow(cCtx, waDB, "aicommand", false, params); err == nil {
 						if wfEngine, ok := cCtx.Locals("wfEngine").([]WorkflowEngine); ok {
 							msg := ""
+							
+							// Process Results & Save State
 							for _, node := range wfEngine {
+								// Check for state update
+								if resMap, ok := node.ResultNode.(map[string]interface{}); ok {
+									if newState, ok := resMap["conversation_state"].(string); ok && newState != "" {
+										if strings.HasPrefix(newState, "{") {
+											// Save to file
+											conversationDir := "./tmp/ai_conversations"
+											os.MkdirAll(conversationDir, 0755)
+											conversationFile := fmt.Sprintf("%s/%d.json", conversationDir, user.Useraccessid)
+											stateData := map[string]interface{}{
+												"conversation_state": newState,
+												"updated_at":         time.Now().Format(time.RFC3339),
+											}
+											if data, err := json.Marshal(stateData); err == nil {
+												os.WriteFile(conversationFile, data, 0644)
+												fmt.Printf("[WA] Saved conversation state for user %d\n", user.Useraccessid)
+											}
+										}
+									}
+								}
+								
 								if strings.EqualFold(node.ComponentName, "sendmessage") {
 									if inputParams, ok := node.DataInputNode.(map[string]string); ok {
 										if m, ok := inputParams["message"]; ok && m != "" {
@@ -506,7 +547,6 @@ func eventHandler(client *whatsmeow.Client, myPhone string, evt interface{}) {
 						}
 					}
 				}
-			}
 		case *events.PairSuccess: 
 			// New Login!
 			newID := v.ID.ToNonAD()
@@ -986,3 +1026,33 @@ func HandleDeleteDevice(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"message": "Device deleted"})
 }
 
+
+// Conversation State Helpers
+var waUserStates = make(map[string]string)
+var waStateMutex sync.Mutex
+
+func getWAUserState(userID string) string {
+	// Read from file ./tmp/ai_conversations/{userID}.json
+	path := fmt.Sprintf("./tmp/ai_conversations/%s.json", userID)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "{}"
+	}
+	
+	var stateMap map[string]interface{}
+	if err := json.Unmarshal(data, &stateMap); err != nil {
+		return "{}"
+	}
+	
+	if state, ok := stateMap["conversation_state"].(string); ok {
+		return state
+	}
+	// Fallback/Legacy
+	return string(data)
+}
+
+func saveWAUserState(userID, state string) {
+	waStateMutex.Lock()
+	defer waStateMutex.Unlock()
+	waUserStates[userID] = state
+}

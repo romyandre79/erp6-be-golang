@@ -213,6 +213,7 @@ func ExecuteAIResult(aiResult map[string]interface{}, db *gorm.DB, ctx *Workflow
 		return nil
 	}
 
+
 	// Check if AI returned a workflow name to execute
 	if workflowName, ok := aiResult["workflow_name"].(string); ok && workflowName != "" {
 		fmt.Printf("[ExecuteAIResult] Executing workflow: %s\n", workflowName)
@@ -431,6 +432,18 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config 
 	}
 
 	lowerCmd := strings.ToLower(command)
+
+	// Global Cancel/Reset Handler
+	if lowerCmd == "cancel" || lowerCmd == "exit" || lowerCmd == "batal" || lowerCmd == "reset" {
+		fmt.Printf("[CompAI] Global cancel triggered by user %s\n", userID)
+		return map[string]interface{}{
+			"execute":            "false",
+			"message":            "Conversation and context reset. ✅",
+			"cancelled":          true,
+			"conversation_state": "{}", // Clear State
+			"user_id":            userID,
+		}, nil
+	}
 
 	// Check if this is a help command
 	if strings.HasPrefix(lowerCmd, "help") {
