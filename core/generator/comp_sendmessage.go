@@ -247,14 +247,54 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 						if userID, ok := c.Locals("userid").(int); ok && userID > 0 {
 							conversationDir := "./tmp/ai_conversations"
 							os.MkdirAll(conversationDir, 0755)
-							conversationFile := fmt.Sprintf("%s/%d.json", conversationDir, userID)
-							stateData := map[string]interface{}{
-								"conversation_state": conversationState,
-								"updated_at":         time.Now().Format(time.RFC3339),
+							
+							// Parse state to check for EntityType
+							var stateMap map[string]interface{}
+							isEntity := false
+							entityType := ""
+							if err := json.Unmarshal([]byte(conversationState), &stateMap); err == nil {
+								if et, ok := stateMap["entity_type"].(string); ok && et != "" {
+									isEntity = true
+									entityType = et
+								}
 							}
-							if data, err := json.Marshal(stateData); err == nil {
-								os.WriteFile(conversationFile, data, 0644)
-								fmt.Printf("[SendMessage] Saved conversation state for user %d\n", userID)
+							
+							masterFile := fmt.Sprintf("%s/%d.json", conversationDir, userID)
+
+							if isEntity {
+								// Update Master with Active Context
+								var masterState map[string]interface{}
+								if data, err := os.ReadFile(masterFile); err == nil {
+									json.Unmarshal(data, &masterState)
+								}
+								if masterState == nil { masterState = make(map[string]interface{}) }
+								
+								masterState["active_context"] = entityType
+								if d, err := json.Marshal(masterState); err == nil {
+									os.WriteFile(masterFile, d, 0644)
+								}
+								
+								// Save Actual State to Entity File
+								entityFile := fmt.Sprintf("%s/%d_%s.json", conversationDir, userID, entityType)
+								stateData := map[string]interface{}{
+									"conversation_state": conversationState,
+									"updated_at":         time.Now().Format(time.RFC3339),
+								}
+								if data, err := json.Marshal(stateData); err == nil {
+									os.WriteFile(entityFile, data, 0644)
+									fmt.Printf("[SendMessage] Saved conversation state for user %d (Entity: %s)\n", userID, entityType)
+								}
+							} else {
+								// Save to Master File (General) and clear context
+								stateData := map[string]interface{}{
+									"conversation_state": conversationState,
+									"updated_at":         time.Now().Format(time.RFC3339),
+									"active_context":     "",
+								}
+								if data, err := json.Marshal(stateData); err == nil {
+									os.WriteFile(masterFile, data, 0644)
+									fmt.Printf("[SendMessage] Saved conversation state for user %d (General)\n", userID)
+								}
 							}
 						}
 					}
@@ -352,14 +392,50 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 						if userID, ok := c.Locals("userid").(int); ok && userID > 0 {
 							conversationDir := "./tmp/ai_conversations"
 							os.MkdirAll(conversationDir, 0755)
-							conversationFile := fmt.Sprintf("%s/%d.json", conversationDir, userID)
-							stateData := map[string]interface{}{
-								"conversation_state": conversationState,
-								"updated_at":         time.Now().Format(time.RFC3339),
+							
+							var stateMap map[string]interface{}
+							isEntity := false
+							entityType := ""
+							if err := json.Unmarshal([]byte(conversationState), &stateMap); err == nil {
+								if et, ok := stateMap["entity_type"].(string); ok && et != "" {
+									isEntity = true
+									entityType = et
+								}
 							}
-							if data, err := json.Marshal(stateData); err == nil {
-								os.WriteFile(conversationFile, data, 0644)
-								fmt.Printf("[SendMessage] Saved Telegram conversation state for user %d\n", userID)
+							
+							masterFile := fmt.Sprintf("%s/%d.json", conversationDir, userID)
+
+							if isEntity {
+								var masterState map[string]interface{}
+								if data, err := os.ReadFile(masterFile); err == nil {
+									json.Unmarshal(data, &masterState)
+								}
+								if masterState == nil { masterState = make(map[string]interface{}) }
+								
+								masterState["active_context"] = entityType
+								if d, err := json.Marshal(masterState); err == nil {
+									os.WriteFile(masterFile, d, 0644)
+								}
+								
+								entityFile := fmt.Sprintf("%s/%d_%s.json", conversationDir, userID, entityType)
+								stateData := map[string]interface{}{
+									"conversation_state": conversationState,
+									"updated_at":         time.Now().Format(time.RFC3339),
+								}
+								if data, err := json.Marshal(stateData); err == nil {
+									os.WriteFile(entityFile, data, 0644)
+									fmt.Printf("[SendMessage] Saved Telegram conversation state for user %d (Entity: %s)\n", userID, entityType)
+								}
+							} else {
+								stateData := map[string]interface{}{
+									"conversation_state": conversationState,
+									"updated_at":         time.Now().Format(time.RFC3339),
+									"active_context":     "",
+								}
+								if data, err := json.Marshal(stateData); err == nil {
+									os.WriteFile(masterFile, data, 0644)
+									fmt.Printf("[SendMessage] Saved Telegram conversation state for user %d (General)\n", userID)
+								}
 							}
 						}
 					}

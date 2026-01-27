@@ -235,13 +235,36 @@ func handleStart(c *fiber.Ctx) error {
 
 	// Load conversation state from file (for AI assistant continuity)
 	if userID, ok := c.Locals("userid").(int); ok && userID > 0 {
-		conversationFile := fmt.Sprintf("./tmp/ai_conversations/%d.json", userID)
-		if data, err := os.ReadFile(conversationFile); err == nil {
+		conversationDir := "./tmp/ai_conversations"
+		masterFile := fmt.Sprintf("%s/%d.json", conversationDir, userID)
+		
+		if data, err := os.ReadFile(masterFile); err == nil {
 			var state map[string]interface{}
 			if json.Unmarshal(data, &state) == nil {
-				if convState, ok := state["conversation_state"].(string); ok && convState != "" {
-					params["conversation_state"] = convState
-					fmt.Printf("[Start Node] Loaded conversation state for user %d\n", userID)
+				// Check for active context override
+				activeContext, _ := state["active_context"].(string)
+				contextLoaded := false
+				
+				if activeContext != "" {
+					entityFile := fmt.Sprintf("%s/%d_%s.json", conversationDir, userID, activeContext)
+					if entityData, err := os.ReadFile(entityFile); err == nil {
+						var entityState map[string]interface{}
+						if json.Unmarshal(entityData, &entityState) == nil {
+							if convState, ok := entityState["conversation_state"].(string); ok && convState != "" {
+								params["conversation_state"] = convState
+								fmt.Printf("[Start Node] Loaded conversation state for user %d (Context: %s)\n", userID, activeContext)
+								contextLoaded = true
+							}
+						}
+					}
+				}
+				
+				// Fallback to master state if no context loaded
+				if !contextLoaded {
+					if convState, ok := state["conversation_state"].(string); ok && convState != "" {
+						params["conversation_state"] = convState
+						fmt.Printf("[Start Node] Loaded conversation state for user %d (General)\n", userID)
+					}
 				}
 			}
 		}
