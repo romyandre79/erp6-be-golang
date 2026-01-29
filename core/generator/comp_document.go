@@ -1,7 +1,9 @@
 package generator
 
 import (
+	"archive/zip"
 	"encoding/base64"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -14,7 +16,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/ledongthuc/pdf"
-	"github.com/nguyenthenguyen/docx"
 	"gorm.io/gorm"
 )
 
@@ -32,7 +33,6 @@ func handleDocument(ctx *WorkflowContext) error {
 		action       string
 		fileField    string
 		documentID   string
-		filePath     string // [NEW] Support local file path
 		maxFileSize  int64 = 10 * 1024 * 1024 // 10MB default limit
 	)
 
@@ -43,9 +43,6 @@ func handleDocument(ctx *WorkflowContext) error {
 			action = strings.ToLower(strings.TrimSpace(p.CompValue))
 		case "file_field", "filefield":
 			fileField = strings.TrimSpace(p.CompValue)
-		case "file_path", "filepath", "file":
-			// Allow direct file path input
-			filePath = ResolveParam(c, strings.TrimSpace(p.CompValue))
 		case "document_id", "documentid":
 			documentID = ResolveParam(c, strings.TrimSpace(p.CompValue))
 		case "max_file_size", "maxfilesize":
@@ -65,7 +62,7 @@ func handleDocument(ctx *WorkflowContext) error {
 
 	switch action {
 	case "upload_and_extract":
-		return handleUploadAndExtract(ctx, fileField, filePath, documentID, userID, maxFileSize)
+		return handleUploadAndExtract(ctx, fileField, documentID, userID, maxFileSize)
 	case "list":
 		return handleListDocuments(ctx, userID)
 	case "get":
@@ -78,25 +75,13 @@ func handleDocument(ctx *WorkflowContext) error {
 	}
 }
 
-func handleUploadAndExtract(ctx *WorkflowContext, fileField, inputFilePath, documentID string, userID int, maxFileSize int64) error {
+func handleUploadAndExtract(ctx *WorkflowContext, fileField string, documentID string, userID int, maxFileSize int64) error {
 	c := ctx.FiberCtx
 	db := ctx.DB
 
-	// Fallback: Check if file path is available in Extras (from AI or previous steps)
-	if inputFilePath == "" {
-		if val, ok := ctx.Extras["file_paths"]; ok && val != nil && val.(string) != "" {
-			inputFilePath = val.(string)
-			fmt.Printf("[CompDocument] Auto-detected input file path from Extras['file_paths']: %s\n", inputFilePath)
-		} else if val, ok := ctx.Extras["file"]; ok && val != nil && val.(string) != "" {
-            // Check if 'file' extra is actually a path string
-            inputFilePath = val.(string)
-            fmt.Printf("[CompDocument] Auto-detected input file path from Extras['file']: %s\n", inputFilePath)
-        }
-	}
-
-	if fileField == "" && inputFilePath == "" {
-		helpers.FailResponse(c, fiber.StatusBadRequest, "MISSING_PARAMETER", "file_field or file_path is required for upload_and_extract")
-		return fmt.Errorf("file_field or file_path parameter is required")
+	if fileField == "" {
+		helpers.FailResponse(c, fiber.StatusBadRequest, "MISSING_PARAMETER", "file_field is required for upload_and_extract")
+		return fmt.Errorf("file_field parameter is required")
 	}
 
 	// Check if this is an UPDATE operation
@@ -120,124 +105,91 @@ func handleUploadAndExtract(ctx *WorkflowContext, fileField, inputFilePath, docu
 	var fileSize int64
 	var contentType string
 
-	// 1. Try Input File Path (Local File)
-	if inputFilePath != "" {
-		fmt.Printf("[CompDocument] Processing local file path: %s\n", inputFilePath)
+	// Try to get file from multipart form first
+	file, err := c.FormFile(fileField)
+	if err == nil {
+		// Multipart file upload
+		fmt.Printf("[CompDocument] Processing multipart file upload\n")
 		
-		// Open local file
-		f, err := os.Open(inputFilePath)
+		// Open the file
+		fileHandle, err := file.Open()
 		if err != nil {
-			helpers.FailResponse(c, fiber.StatusBadRequest, "FILE_NOT_FOUND", "Failed to open local file: "+inputFilePath)
+			helpers.FailResponse(c, fiber.StatusInternalServerError, "FILE_READ_ERROR", "Failed to read uploaded file")
 			return err
 		}
-		defer f.Close()
+		defer fileHandle.Close()
 
 		// Read file data
-		fileData, err = io.ReadAll(f)
+		fileData, err = io.ReadAll(fileHandle)
 		if err != nil {
-			helpers.FailResponse(c, fiber.StatusInternalServerError, "FILE_READ_ERROR", "Failed to read local file")
+			helpers.FailResponse(c, fiber.StatusInternalServerError, "FILE_READ_ERROR", "Failed to read file content")
 			return err
 		}
 
-		info, _ := f.Stat()
-		fileName = filepath.Base(inputFilePath)
-		fileSize = info.Size()
-		// Content type detection (basic)
-		ext := strings.ToLower(filepath.Ext(fileName))
-		if ext == ".pdf" {
-			contentType = "application/pdf"
-		} else if ext == ".docx" {
-			contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-		}
-		
+		fileName = file.Filename
+		fileSize = file.Size
+		contentType = file.Header.Get("Content-Type")
 	} else {
-		// 2. Try Multipart Form
-		file, err := c.FormFile(fileField)
-		if err == nil {
-			// Multipart file upload
-			fmt.Printf("[CompDocument] Processing multipart file upload\n")
-			
-			// Open the file
-			fileHandle, err := file.Open()
-			if err != nil {
-				helpers.FailResponse(c, fiber.StatusInternalServerError, "FILE_READ_ERROR", "Failed to read uploaded file")
-				return err
-			}
-			defer fileHandle.Close()
-
-			// Read file data
-			fileData, err = io.ReadAll(fileHandle)
-			if err != nil {
-				helpers.FailResponse(c, fiber.StatusInternalServerError, "FILE_READ_ERROR", "Failed to read file content")
-				return err
-			}
-
-			fileName = file.Filename
-			fileSize = file.Size
-			contentType = file.Header.Get("Content-Type")
-		} else {
-			// 3. Try Base64 Data
-			// Try to get base64 encoded file from form field
-			fmt.Printf("[CompDocument] Multipart file not found, checking for base64 data\n")
-			
-			base64Data := c.FormValue(fileField)
-			if base64Data == "" {
-				helpers.FailResponse(c, fiber.StatusBadRequest, "FILE_NOT_FOUND", "No file uploaded in field: "+fileField)
-				return fmt.Errorf("no file data found in field: %s", fileField)
-			}
-
-			// Parse base64 data (format: data:mime/type;base64,<data>)
-			var base64Content string
-			if strings.HasPrefix(base64Data, "data:") {
-				// Extract MIME type and base64 content
-				parts := strings.SplitN(base64Data, ",", 2)
-				if len(parts) != 2 {
-					helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_BASE64", "Invalid base64 data format")
-					return fmt.Errorf("invalid base64 format")
-				}
-
-				// Extract MIME type from data:mime/type;base64
-				mimeTypePart := parts[0]
-				if strings.Contains(mimeTypePart, ":") && strings.Contains(mimeTypePart, ";") {
-					contentType = strings.TrimPrefix(strings.Split(mimeTypePart, ";")[0], "data:")
-				}
-
-				base64Content = parts[1]
-			} else {
-				// Plain base64 without data URI prefix
-				base64Content = base64Data
-			}
-
-			// Decode base64
-			var decodeErr error
-			fileData, decodeErr = base64.StdEncoding.DecodeString(base64Content)
-			if decodeErr != nil {
-				helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_BASE64", "Failed to decode base64 data")
-				return fmt.Errorf("base64 decode error: %w", decodeErr)
-			}
-
-			fileSize = int64(len(fileData))
-
-			// Get filename from separate field (file_filename)
-			fileName = c.FormValue(fileField + "_filename")
-			if fileName == "" {
-				// Generate default filename based on content type
-				ext := ".bin"
-				if contentType != "" {
-					switch contentType {
-					case "application/pdf":
-						ext = ".pdf"
-					case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-						ext = ".docx"
-					case "application/msword":
-						ext = ".doc"
-					}
-				}
-				fileName = fmt.Sprintf("document_%d%s", time.Now().Unix(), ext)
-			}
-
-			fmt.Printf("[CompDocument] Decoded base64 file: %s (Size: %d bytes)\n", fileName, fileSize)
+		// Try to get base64 encoded file from form field
+		fmt.Printf("[CompDocument] Multipart file not found, checking for base64 data\n")
+		
+		base64Data := c.FormValue(fileField)
+		if base64Data == "" {
+			helpers.FailResponse(c, fiber.StatusBadRequest, "FILE_NOT_FOUND", "No file uploaded in field: "+fileField)
+			return fmt.Errorf("no file data found in field: %s", fileField)
 		}
+
+		// Parse base64 data (format: data:mime/type;base64,<data>)
+		var base64Content string
+		if strings.HasPrefix(base64Data, "data:") {
+			// Extract MIME type and base64 content
+			parts := strings.SplitN(base64Data, ",", 2)
+			if len(parts) != 2 {
+				helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_BASE64", "Invalid base64 data format")
+				return fmt.Errorf("invalid base64 format")
+			}
+
+			// Extract MIME type from data:mime/type;base64
+			mimeTypePart := parts[0]
+			if strings.Contains(mimeTypePart, ":") && strings.Contains(mimeTypePart, ";") {
+				contentType = strings.TrimPrefix(strings.Split(mimeTypePart, ";")[0], "data:")
+			}
+
+			base64Content = parts[1]
+		} else {
+			// Plain base64 without data URI prefix
+			base64Content = base64Data
+		}
+
+		// Decode base64
+		var decodeErr error
+		fileData, decodeErr = base64.StdEncoding.DecodeString(base64Content)
+		if decodeErr != nil {
+			helpers.FailResponse(c, fiber.StatusBadRequest, "INVALID_BASE64", "Failed to decode base64 data")
+			return fmt.Errorf("base64 decode error: %w", decodeErr)
+		}
+
+		fileSize = int64(len(fileData))
+
+		// Get filename from separate field (file_filename)
+		fileName = c.FormValue(fileField + "_filename")
+		if fileName == "" {
+			// Generate default filename based on content type
+			ext := ".bin"
+			if contentType != "" {
+				switch contentType {
+				case "application/pdf":
+					ext = ".pdf"
+				case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+					ext = ".docx"
+				case "application/msword":
+					ext = ".doc"
+				}
+			}
+			fileName = fmt.Sprintf("document_%d%s", time.Now().Unix(), ext)
+		}
+
+		fmt.Printf("[CompDocument] Decoded base64 file: %s (Size: %d bytes)\n", fileName, fileSize)
 	}
 
 	fmt.Printf("[CompDocument] Validating file: %s (Size: %d bytes)\n", fileName, fileSize)
@@ -325,18 +277,17 @@ func handleUploadAndExtract(ctx *WorkflowContext, fileField, inputFilePath, docu
 
 	// Extract text based on file type
 	var extractedText string
-	var extractErr error
 	if fileType == "pdf" {
-		extractedText, extractErr = extractTextFromPDF(savePath)
+		extractedText, err = extractTextFromPDF(savePath)
 	} else {
-		extractedText, extractErr = extractTextFromDOCX(savePath)
+		extractedText, err = extractTextFromDOCX(savePath)
 	}
 
-	if extractErr != nil {
+	if err != nil {
 		// Clean up file if extraction fails
 		os.Remove(savePath)
 		helpers.FailResponse(c, fiber.StatusInternalServerError, "EXTRACTION_ERROR", "Failed to extract text from document")
-		return extractErr
+		return err
 	}
 
 	fmt.Printf("[CompDocument] Extracted %d characters of text\n", len(extractedText))
@@ -424,10 +375,9 @@ func handleUploadAndExtract(ctx *WorkflowContext, fileField, inputFilePath, docu
 	ctx.Extras["document_filename"] = document.FileName
 
 	// Update workflow engine result
-	if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
-		wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
-		c.Locals("wfEngine", wfEngine)
-	}
+	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
+	c.Locals("wfEngine", wfEngine)
 
 	helpers.SuccessResponse(c, "DOCUMENT_UPLOADED", responseData)
 	return nil
@@ -464,10 +414,9 @@ func handleListDocuments(ctx *WorkflowContext, userID int) error {
 	}
 
 	// Update workflow engine result
-	if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
-		wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
-		c.Locals("wfEngine", wfEngine)
-	}
+	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
+	c.Locals("wfEngine", wfEngine)
 
 	helpers.SuccessResponse(c, "DOCUMENTS_RETRIEVED", responseData)
 	return nil
@@ -510,10 +459,9 @@ func handleGetDocument(ctx *WorkflowContext, documentID string, userID int) erro
 	ctx.Extras["document_filename"] = document.FileName
 
 	// Update workflow engine result
-	if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
-		wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
-		c.Locals("wfEngine", wfEngine)
-	}
+	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
+	c.Locals("wfEngine", wfEngine)
 
 	helpers.SuccessResponse(c, "DOCUMENT_RETRIEVED", responseData)
 	return nil
@@ -556,10 +504,9 @@ func handleDeleteDocument(ctx *WorkflowContext, documentID string, userID int) e
 	}
 
 	// Update workflow engine result
-	if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok {
-		wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
-		c.Locals("wfEngine", wfEngine)
-	}
+	wfEngine := c.Locals("wfEngine").([]WorkflowEngine)
+	wfEngine = append(wfEngine, WorkflowEngine{DataInputNode: "", ResultNode: responseData})
+	c.Locals("wfEngine", wfEngine)
 
 	helpers.SuccessResponse(c, "DOCUMENT_DELETED", responseData)
 	return nil
@@ -596,104 +543,200 @@ func extractTextFromPDF(filePath string) (string, error) {
 }
 
 // extractTextFromDOCX extracts text content from a DOCX file
+// extractTextFromDOCX extracts text content from a DOCX file, handling lists and images
 func extractTextFromDOCX(filePath string) (string, error) {
-	r, err := docx.ReadDocxFile(filePath)
+	reader, err := zip.OpenReader(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open DOCX: %w", err)
 	}
-	defer r.Close()
+	defer reader.Close()
 
-	doc := r.Editable()
-	rawContent := doc.GetContent()
+	// 1. Map Relationships (for images)
+	repoIDToTarget := make(map[string]string)
+	var relsFile *zip.File
+	for _, f := range reader.File {
+		if f.Name == "word/_rels/document.xml.rels" {
+			relsFile = f
+			break
+		}
+	}
 
-	// The GetContent() returns XML, we need to extract text from <w:t> tags
+	if relsFile != nil {
+		rc, err := relsFile.Open()
+		if err == nil {
+			defer rc.Close()
+			parseRelationships(rc, repoIDToTarget)
+		}
+	}
+
+	// 2. Extract Media Files
+	mediaMap := make(map[string]string) // Target -> Public URL
+	uploadDir := "public/documents/media"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		fmt.Printf("[CompDocument] Warning: Failed to create media directory: %v\n", err)
+	}
+
+	for _, f := range reader.File {
+		if strings.HasPrefix(f.Name, "word/media/") {
+			// Extract file
+			originalName := filepath.Base(f.Name)
+			// Create unique filename
+			timestamp := time.Now().UnixNano()
+			newName := fmt.Sprintf("%d_%s", timestamp, originalName)
+			savePath := filepath.Join(uploadDir, newName)
+			
+			// Copy content
+			rc, err := f.Open()
+			if err != nil {
+				continue
+			}
+			
+			outFile, err := os.Create(savePath)
+			if err != nil {
+				rc.Close()
+				continue
+			}
+			
+			_, err = io.Copy(outFile, rc)
+			outFile.Close()
+			rc.Close()
+			
+			if err == nil {
+				// Map encoded path to public URL
+				// DOCX internal paths are relative usually, e.g. "media/image1.png"
+				// We map "media/"+originalName to our public path
+				publicPath := "/documents/media/" + newName
+				mediaMap["media/"+originalName] = publicPath
+				fmt.Printf("[CompDocument] Extracted media: %s -> %s\n", f.Name, publicPath)
+			}
+		}
+	}
+
+	// 3. Parse Document XML
+	var docFile *zip.File
+	for _, f := range reader.File {
+		if f.Name == "word/document.xml" {
+			docFile = f
+			break
+		}
+	}
+
+	if docFile == nil {
+		return "", fmt.Errorf("document.xml not found in DOCX")
+	}
+
+	rc, err := docFile.Open()
+	if err != nil {
+		return "", fmt.Errorf("failed to open document.xml: %w", err)
+	}
+	defer rc.Close()
+
+	return parseDocumentXML(rc, repoIDToTarget, mediaMap)
+}
+
+// Helper structures for XML parsing
+type Relationships struct {
+	XMLName       xml.Name       `xml:"Relationships"`
+	Relationships []Relationship `xml:"Relationship"`
+}
+
+type Relationship struct {
+	ID     string `xml:"Id,attr"`
+	Type   string `xml:"Type,attr"`
+	Target string `xml:"Target,attr"`
+}
+
+func parseRelationships(r io.Reader, m map[string]string) {
+	var rels Relationships
+	decoder := xml.NewDecoder(r)
+	if err := decoder.Decode(&rels); err != nil {
+		return
+	}
+	for _, rel := range rels.Relationships {
+		m[rel.ID] = rel.Target
+	}
+}
+
+func parseDocumentXML(r io.Reader, rels map[string]string, mediaMap map[string]string) (string, error) {
+	decoder := xml.NewDecoder(r)
 	var textBuilder strings.Builder
 	
-	// Simple XML parsing to extract text from <w:t> tags
-	lines := strings.Split(rawContent, "<w:t")
-	for i, line := range lines {
-		if i == 0 {
-			continue // Skip first part before any <w:t> tag
-		}
-		
-		// Find the closing tag
-		endTag := strings.Index(line, "</w:t>")
-		if endTag == -1 {
-			continue
-		}
-		
-		// Find the end of opening tag
-		startContent := strings.Index(line, ">")
-		if startContent == -1 || startContent >= endTag {
-			continue
-		}
-		
-		// Extract text between tags
-		text := line[startContent+1 : endTag]
-		
-		// Decode XML entities
-		text = strings.ReplaceAll(text, "&lt;", "<")
-		text = strings.ReplaceAll(text, "&gt;", ">")
-		text = strings.ReplaceAll(text, "&amp;", "&")
-		text = strings.ReplaceAll(text, "&quot;", "\"")
-		text = strings.ReplaceAll(text, "&apos;", "'")
-		
-		textBuilder.WriteString(text)
-	}
-	
-	// Add paragraph breaks by detecting <w:p> tags
-	result := textBuilder.String()
-	
-	// Clean up: replace multiple spaces with single space
-	result = strings.Join(strings.Fields(result), " ")
-	
-	// Add some basic paragraph structure
-	paragraphs := strings.Split(rawContent, "<w:p ")
-	var finalText strings.Builder
-	
-	for i, para := range paragraphs {
-		if i == 0 {
-			continue
-		}
-		
-		// Extract text from this paragraph
-		var paraText strings.Builder
-		textParts := strings.Split(para, "<w:t")
-		
-		for j, part := range textParts {
-			if j == 0 {
-				continue
-			}
-			
-			endTag := strings.Index(part, "</w:t>")
-			if endTag == -1 {
-				continue
-			}
-			
-			startContent := strings.Index(part, ">")
-			if startContent == -1 || startContent >= endTag {
-				continue
-			}
-			
-			text := part[startContent+1 : endTag]
-			
-			// Decode XML entities
-			text = strings.ReplaceAll(text, "&lt;", "<")
-			text = strings.ReplaceAll(text, "&gt;", ">")
-			text = strings.ReplaceAll(text, "&amp;", "&")
-			text = strings.ReplaceAll(text, "&quot;", "\"")
-			text = strings.ReplaceAll(text, "&apos;", "'")
-			
-			paraText.WriteString(text)
-		}
-		
-		if paraText.Len() > 0 {
-			finalText.WriteString(paraText.String())
-			finalText.WriteString("\n")
-		}
-	}
+	// State tracking
+	inText := false
 
-	return strings.TrimSpace(finalText.String()), nil
+
+	for {
+		t, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", err
+		}
+
+		switch se := t.(type) {
+		case xml.StartElement:
+			switch se.Name.Local {
+			case "p": // Paragraph
+				// Reset text state just in case
+				inText = false
+			
+			case "numPr": // Numbering properties (List item)
+				// We encountered a list item
+				// User requested to replace numbering/bullet with just newline for Gemma.
+				textBuilder.WriteString("\n")
+				
+			case "t": // Text
+				inText = true
+			case "br", "cr": // Break
+				textBuilder.WriteString("\n")
+			case "tab": // Tab
+				textBuilder.WriteString("\t")
+			case "drawing", "pict", "object": 
+				// Potential image/media
+				// We look for blip in children
+			case "blip", "imagedata":
+				// Image reference
+				var embedID string
+				for _, attr := range se.Attr {
+					if attr.Name.Local == "embed" || attr.Name.Local == "id" { 
+						embedID = attr.Value
+					}
+				}
+				
+				if embedID != "" {
+					target, ok := rels[embedID]
+					if ok {
+						// Target is like "media/image1.png"
+						publicURL, hasMedia := mediaMap[target]
+						if hasMedia {
+							textBuilder.WriteString(fmt.Sprintf("\n![Image](%s)\n", publicURL))
+						} else {
+							textBuilder.WriteString(fmt.Sprintf("\n[IMAGE: %s]\n", target))
+						}
+					}
+				}
+			}
+			
+		case xml.EndElement:
+			switch se.Name.Local {
+			case "p":
+				textBuilder.WriteString("\n\n") // Double newline for paragraph break
+			case "t":
+				inText = false
+			}
+			
+		case xml.CharData:
+			if inText {
+				textBuilder.Write(se)
+			}
+		}
+	}
+	
+	result := textBuilder.String()
+	// Clean up excessive newlines
+	result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
+	return strings.TrimSpace(result), nil
 }
 
 // extractTextFromDOC extracts text from legacy DOC files

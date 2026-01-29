@@ -110,6 +110,13 @@ func handleAI(ctx *WorkflowContext) error {
 			}
 		}
 	}
+
+	// 1.5 Fallback: Check Extras from previous nodes (e.g. comp_document)
+	if documentIDs == "" {
+		if val, ok := ctx.Extras["document_id"]; ok && val != nil {
+			documentIDs = fmt.Sprintf("%v", val)
+		}
+	}
     
     // Fallback: If parameters didn't have file_paths (not mapped in workflow), check form/extras directly
     if filePaths == "" {
@@ -524,6 +531,7 @@ func processAI(command, stateJSON, dbDriver, userID string, db *gorm.DB, config 
 			for _, trigger := range flow.Triggers {
 				if strings.Contains(lowerCmd, strings.ToLower(trigger)) {
 					fmt.Printf("[CompAI] MATCHED Trigger '%s' for entity '%s'\n", trigger, entity.Name)
+
 					// Found trigger, force new conversation
 					return runConversationStep(command, models.AIConversationState{}, dbDriver, userID, entity.Name, "", db, filePaths)
 				}
@@ -725,8 +733,8 @@ INSTRUCTIONS:
 2. If the user asks a question, answer ONLY using information from the documents below.
 3. You MUST NOT use general knowledge if information can be found in documents.
 4. If information for a specific question does NOT exist in the documents:
-   - English: "Information does not exist in the uploaded documents."
-   - Indonesian: "Informasi tersebut tidak ada dalam dokumen yang diunggah."
+   - English: "Information does not exist in the uploaded documents. Type help to get more information."
+   - Indonesian: "Informasi tersebut tidak ada dalam dokumen yang diunggah. Ketik 'help' untuk mendapatkan informasi lebih lanjut."
    - Do NOT make up an answer.
 
 FORMAT RULES:
@@ -1186,6 +1194,7 @@ LANGUAGE RULES:
 		"message":            cleanMessage,
 		"conversation_state": string(stateBytes),
 		"user_id":            userID,
+		"execute":            "false", // Explicitly disable execution for general/document Q&A
 	}, nil
 }
 
@@ -1335,10 +1344,16 @@ func runConversationStep(command string, state models.AIConversationState, dbDri
 		question := flow.Questions[state.CurrentStep]
 		state.CurrentStep++
 
+		// Use Description as the prompt message if available, otherwise Text
+		prompt := question.Description
+		if prompt == "" {
+			prompt = question.Text
+		}
+
 		stateBytes, _ := json.Marshal(state)
 		response := map[string]interface{}{
 			"execute":            "false",
-			"message":            question.Text,
+			"message":            prompt,
 			"conversation_state": string(stateBytes),
 			"question_key":       question.Key,
 			"question_help":      question.Description,
