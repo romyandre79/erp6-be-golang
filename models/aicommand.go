@@ -27,6 +27,8 @@ type AIConversationState struct {
 	IsComplete          bool              `json:"is_complete"`          // Whether conversation is complete
 	WaitingConfirmation bool              `json:"waiting_confirmation"` // Waiting for user to type 'execute'
 	History             []AIMessage       `json:"history"`              // Full conversation history
+	DocumentIDs         string            `json:"document_ids"`         // Persist uploaded documents
+	FilePaths           string            `json:"file_paths"`           // Persist other uploaded files (images, excel, etc)
 }
 
 type AIMessage struct {

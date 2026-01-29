@@ -1,7 +1,9 @@
 package generator
 
 import (
+	"archive/zip"
 	"encoding/base64"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -14,7 +16,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/ledongthuc/pdf"
-	"github.com/nguyenthenguyen/docx"
 	"gorm.io/gorm"
 )
 
@@ -542,104 +543,200 @@ func extractTextFromPDF(filePath string) (string, error) {
 }
 
 // extractTextFromDOCX extracts text content from a DOCX file
+// extractTextFromDOCX extracts text content from a DOCX file, handling lists and images
 func extractTextFromDOCX(filePath string) (string, error) {
-	r, err := docx.ReadDocxFile(filePath)
+	reader, err := zip.OpenReader(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to open DOCX: %w", err)
 	}
-	defer r.Close()
+	defer reader.Close()
 
-	doc := r.Editable()
-	rawContent := doc.GetContent()
+	// 1. Map Relationships (for images)
+	repoIDToTarget := make(map[string]string)
+	var relsFile *zip.File
+	for _, f := range reader.File {
+		if f.Name == "word/_rels/document.xml.rels" {
+			relsFile = f
+			break
+		}
+	}
 
-	// The GetContent() returns XML, we need to extract text from <w:t> tags
+	if relsFile != nil {
+		rc, err := relsFile.Open()
+		if err == nil {
+			defer rc.Close()
+			parseRelationships(rc, repoIDToTarget)
+		}
+	}
+
+	// 2. Extract Media Files
+	mediaMap := make(map[string]string) // Target -> Public URL
+	uploadDir := "public/documents/media"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		fmt.Printf("[CompDocument] Warning: Failed to create media directory: %v\n", err)
+	}
+
+	for _, f := range reader.File {
+		if strings.HasPrefix(f.Name, "word/media/") {
+			// Extract file
+			originalName := filepath.Base(f.Name)
+			// Create unique filename
+			timestamp := time.Now().UnixNano()
+			newName := fmt.Sprintf("%d_%s", timestamp, originalName)
+			savePath := filepath.Join(uploadDir, newName)
+			
+			// Copy content
+			rc, err := f.Open()
+			if err != nil {
+				continue
+			}
+			
+			outFile, err := os.Create(savePath)
+			if err != nil {
+				rc.Close()
+				continue
+			}
+			
+			_, err = io.Copy(outFile, rc)
+			outFile.Close()
+			rc.Close()
+			
+			if err == nil {
+				// Map encoded path to public URL
+				// DOCX internal paths are relative usually, e.g. "media/image1.png"
+				// We map "media/"+originalName to our public path
+				publicPath := "/documents/media/" + newName
+				mediaMap["media/"+originalName] = publicPath
+				fmt.Printf("[CompDocument] Extracted media: %s -> %s\n", f.Name, publicPath)
+			}
+		}
+	}
+
+	// 3. Parse Document XML
+	var docFile *zip.File
+	for _, f := range reader.File {
+		if f.Name == "word/document.xml" {
+			docFile = f
+			break
+		}
+	}
+
+	if docFile == nil {
+		return "", fmt.Errorf("document.xml not found in DOCX")
+	}
+
+	rc, err := docFile.Open()
+	if err != nil {
+		return "", fmt.Errorf("failed to open document.xml: %w", err)
+	}
+	defer rc.Close()
+
+	return parseDocumentXML(rc, repoIDToTarget, mediaMap)
+}
+
+// Helper structures for XML parsing
+type Relationships struct {
+	XMLName       xml.Name       `xml:"Relationships"`
+	Relationships []Relationship `xml:"Relationship"`
+}
+
+type Relationship struct {
+	ID     string `xml:"Id,attr"`
+	Type   string `xml:"Type,attr"`
+	Target string `xml:"Target,attr"`
+}
+
+func parseRelationships(r io.Reader, m map[string]string) {
+	var rels Relationships
+	decoder := xml.NewDecoder(r)
+	if err := decoder.Decode(&rels); err != nil {
+		return
+	}
+	for _, rel := range rels.Relationships {
+		m[rel.ID] = rel.Target
+	}
+}
+
+func parseDocumentXML(r io.Reader, rels map[string]string, mediaMap map[string]string) (string, error) {
+	decoder := xml.NewDecoder(r)
 	var textBuilder strings.Builder
 	
-	// Simple XML parsing to extract text from <w:t> tags
-	lines := strings.Split(rawContent, "<w:t")
-	for i, line := range lines {
-		if i == 0 {
-			continue // Skip first part before any <w:t> tag
-		}
-		
-		// Find the closing tag
-		endTag := strings.Index(line, "</w:t>")
-		if endTag == -1 {
-			continue
-		}
-		
-		// Find the end of opening tag
-		startContent := strings.Index(line, ">")
-		if startContent == -1 || startContent >= endTag {
-			continue
-		}
-		
-		// Extract text between tags
-		text := line[startContent+1 : endTag]
-		
-		// Decode XML entities
-		text = strings.ReplaceAll(text, "&lt;", "<")
-		text = strings.ReplaceAll(text, "&gt;", ">")
-		text = strings.ReplaceAll(text, "&amp;", "&")
-		text = strings.ReplaceAll(text, "&quot;", "\"")
-		text = strings.ReplaceAll(text, "&apos;", "'")
-		
-		textBuilder.WriteString(text)
-	}
-	
-	// Add paragraph breaks by detecting <w:p> tags
-	result := textBuilder.String()
-	
-	// Clean up: replace multiple spaces with single space
-	result = strings.Join(strings.Fields(result), " ")
-	
-	// Add some basic paragraph structure
-	paragraphs := strings.Split(rawContent, "<w:p ")
-	var finalText strings.Builder
-	
-	for i, para := range paragraphs {
-		if i == 0 {
-			continue
-		}
-		
-		// Extract text from this paragraph
-		var paraText strings.Builder
-		textParts := strings.Split(para, "<w:t")
-		
-		for j, part := range textParts {
-			if j == 0 {
-				continue
-			}
-			
-			endTag := strings.Index(part, "</w:t>")
-			if endTag == -1 {
-				continue
-			}
-			
-			startContent := strings.Index(part, ">")
-			if startContent == -1 || startContent >= endTag {
-				continue
-			}
-			
-			text := part[startContent+1 : endTag]
-			
-			// Decode XML entities
-			text = strings.ReplaceAll(text, "&lt;", "<")
-			text = strings.ReplaceAll(text, "&gt;", ">")
-			text = strings.ReplaceAll(text, "&amp;", "&")
-			text = strings.ReplaceAll(text, "&quot;", "\"")
-			text = strings.ReplaceAll(text, "&apos;", "'")
-			
-			paraText.WriteString(text)
-		}
-		
-		if paraText.Len() > 0 {
-			finalText.WriteString(paraText.String())
-			finalText.WriteString("\n")
-		}
-	}
+	// State tracking
+	inText := false
 
-	return strings.TrimSpace(finalText.String()), nil
+
+	for {
+		t, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return "", err
+		}
+
+		switch se := t.(type) {
+		case xml.StartElement:
+			switch se.Name.Local {
+			case "p": // Paragraph
+				// Reset text state just in case
+				inText = false
+			
+			case "numPr": // Numbering properties (List item)
+				// We encountered a list item
+				// User requested to replace numbering/bullet with just newline for Gemma.
+				textBuilder.WriteString("\n")
+				
+			case "t": // Text
+				inText = true
+			case "br", "cr": // Break
+				textBuilder.WriteString("\n")
+			case "tab": // Tab
+				textBuilder.WriteString("\t")
+			case "drawing", "pict", "object": 
+				// Potential image/media
+				// We look for blip in children
+			case "blip", "imagedata":
+				// Image reference
+				var embedID string
+				for _, attr := range se.Attr {
+					if attr.Name.Local == "embed" || attr.Name.Local == "id" { 
+						embedID = attr.Value
+					}
+				}
+				
+				if embedID != "" {
+					target, ok := rels[embedID]
+					if ok {
+						// Target is like "media/image1.png"
+						publicURL, hasMedia := mediaMap[target]
+						if hasMedia {
+							textBuilder.WriteString(fmt.Sprintf("\n![Image](%s)\n", publicURL))
+						} else {
+							textBuilder.WriteString(fmt.Sprintf("\n[IMAGE: %s]\n", target))
+						}
+					}
+				}
+			}
+			
+		case xml.EndElement:
+			switch se.Name.Local {
+			case "p":
+				textBuilder.WriteString("\n\n") // Double newline for paragraph break
+			case "t":
+				inText = false
+			}
+			
+		case xml.CharData:
+			if inText {
+				textBuilder.Write(se)
+			}
+		}
+	}
+	
+	result := textBuilder.String()
+	// Clean up excessive newlines
+	result = strings.ReplaceAll(result, "\n\n\n", "\n\n")
+	return strings.TrimSpace(result), nil
 }
 
 // extractTextFromDOC extracts text from legacy DOC files

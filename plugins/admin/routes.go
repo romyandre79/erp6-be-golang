@@ -80,6 +80,7 @@ func RegisterRoutes(app *fiber.App, db *gorm.DB) {
 		admin.Post("/down-template", func(c *fiber.Ctx) error { return DownTemplateHandler(c, db) })
 		admin.Post("/execute-table-operation", func(c *fiber.Ctx) error { return ExecuteTableOperationHandler(c, db) })
 		admin.Post("/ai/command", func(c *fiber.Ctx) error { return AiCommandHandler(c, db) })
+		admin.Post("/ai/upload", func(c *fiber.Ctx) error { return AiUploadHandler(c, db) })
 		admin.Post("/plugins/upload", func(c *fiber.Ctx) error {
 			return dbgenerator.HandlePluginUpload(c, db)
 		})

@@ -233,39 +233,157 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 		}
 		
 		// For chat messages, just send via WebSocket without saving to DB
-		// Also extract conversation_state and execute flag from previous node if available
+		// Also extract conversation_state which might be from ANY previous node (AI node might be earlier)
 		var conversationState string
 		var executeFlag string
+		
 		if wfEngine, ok := c.Locals("wfEngine").([]WorkflowEngine); ok && len(wfEngine) > 0 {
+			// Search backwards for conversation_state
+			for i := len(wfEngine) - 1; i >= 0; i-- {
+				if wfEngine[i].ResultNode != nil {
+					if resultMap, ok := wfEngine[i].ResultNode.(map[string]interface{}); ok {
+						if state, ok := resultMap["conversation_state"].(string); ok && state != "" {
+							conversationState = state
+							
+							// Found the state! Now check if we need to update it with new artifacts (docs/files)
+							// from subsequent nodes (like comp_document).
+							// Artifacts are usually stored in ctx.Extras (c.Locals("wfExtras"))
+							if wfExtras, ok := c.Locals("wfExtras").(map[string]interface{}); ok {
+								var stateObj models.AIConversationState
+								if err := json.Unmarshal([]byte(conversationState), &stateObj); err == nil {
+									updated := false
+									
+									// Check for new Document ID
+									if docID, ok := wfExtras["document_id"]; ok && docID != nil {
+										newDocID := fmt.Sprintf("%v", docID)
+										if newDocID != "" && newDocID != "0" {
+											// Append or Replace? AI usually handles comma-separated.
+											if stateObj.DocumentIDs == "" {
+												stateObj.DocumentIDs = newDocID
+											} else if !strings.Contains(stateObj.DocumentIDs, newDocID) {
+												stateObj.DocumentIDs = stateObj.DocumentIDs + "," + newDocID
+											}
+											updated = true
+											fmt.Printf("[SendMessage] Matched new Document ID: %s, Updated State Refs\n", newDocID)
+										}
+									}
+									
+									// Check for new File Paths
+									if filePaths, ok := wfExtras["file_paths"]; ok && filePaths != nil {
+										newPaths := fmt.Sprintf("%v", filePaths)
+										if newPaths != "" {
+											if stateObj.FilePaths == "" {
+												stateObj.FilePaths = newPaths
+											} else if !strings.Contains(stateObj.FilePaths, newPaths) {
+												stateObj.FilePaths = stateObj.FilePaths + "," + newPaths
+											}
+											updated = true
+										}
+									} else if files, ok := wfExtras["files"]; ok && files != nil {
+                                        // Fallback to "files" key
+                                        newPaths := fmt.Sprintf("%v", files)
+                                        if newPaths != "" {
+                                            if stateObj.FilePaths == "" {
+                                                stateObj.FilePaths = newPaths
+                                            } else {
+                                                stateObj.FilePaths = stateObj.FilePaths + "," + newPaths
+                                            }
+                                            updated = true
+                                        }
+                                    }
+
+									if updated {
+										if newStateBytes, err := json.Marshal(stateObj); err == nil {
+											conversationState = string(newStateBytes)
+											fmt.Printf("[SendMessage] Updated conversation_state with new artifacts\n")
+										}
+									}
+								}
+							}
+							break // Found and updated (if needed), stop searching
+						}
+					}
+				}
+			}
+			
+			// Also check for execute flag (usually in the LAST result or AI result)
+			// Let's check the very last result first for immediate execution status
 			lastResult := wfEngine[len(wfEngine)-1]
 			if lastResult.ResultNode != nil {
 				if resultMap, ok := lastResult.ResultNode.(map[string]interface{}); ok {
-					if state, ok := resultMap["conversation_state"].(string); ok {
-						conversationState = state
-						
-						// Save conversation state to file for next message
-						if userID, ok := c.Locals("userid").(int); ok && userID > 0 {
-							conversationDir := "./tmp/ai_conversations"
-							os.MkdirAll(conversationDir, 0755)
-							conversationFile := fmt.Sprintf("%s/%d.json", conversationDir, userID)
-							stateData := map[string]interface{}{
-								"conversation_state": conversationState,
-								"updated_at":         time.Now().Format(time.RFC3339),
-							}
-							if data, err := json.Marshal(stateData); err == nil {
-								os.WriteFile(conversationFile, data, 0644)
-								fmt.Printf("[SendMessage] Saved conversation state for user %d\n", userID)
-							}
-						}
-					}
-					
-					// Check execute flag
 					if exec, ok := resultMap["execute"].(string); ok {
 						executeFlag = exec
 					}
 				}
 			}
+			// If not found, check AI result (where we found state)
+			if executeFlag == "" && conversationState != "" { 
+				// We already iterated, but didn't save the index. 
+				// It's acceptable if execute flag is only relevant from the immediate action?
+				// Actually, if AI said execute=true, the action ran. The action result might not have execute=true.
+				// So executeFlag="true" mainly serves to tell Frontend "I am doing something".
+				// If action finished, executeFlag doesn't matter much.
+			}
 		}
+
+		// Save conversation state to file for next message
+		if conversationState != "" {
+			if userID, ok := c.Locals("userid").(int); ok && userID > 0 {
+							conversationDir := "./tmp/ai_conversations"
+							os.MkdirAll(conversationDir, 0755)
+							
+							// Parse state to check for EntityType
+							var stateMap map[string]interface{}
+							isEntity := false
+							entityType := ""
+							if err := json.Unmarshal([]byte(conversationState), &stateMap); err == nil {
+								if et, ok := stateMap["entity_type"].(string); ok && et != "" {
+									isEntity = true
+									entityType = et
+								}
+							}
+							
+							masterFile := fmt.Sprintf("%s/%d.json", conversationDir, userID)
+
+							if isEntity {
+								// Update Master with Active Context
+								var masterState map[string]interface{}
+								if data, err := os.ReadFile(masterFile); err == nil {
+									json.Unmarshal(data, &masterState)
+								}
+								if masterState == nil { masterState = make(map[string]interface{}) }
+								
+								masterState["active_context"] = entityType
+								if d, err := json.Marshal(masterState); err == nil {
+									os.WriteFile(masterFile, d, 0644)
+								}
+								
+								// Save Actual State to Entity File
+								entityFile := fmt.Sprintf("%s/%d_%s.json", conversationDir, userID, entityType)
+								stateData := map[string]interface{}{
+									"conversation_state": conversationState,
+									"updated_at":         time.Now().Format(time.RFC3339),
+								}
+								if data, err := json.Marshal(stateData); err == nil {
+									os.WriteFile(entityFile, data, 0644)
+									fmt.Printf("[SendMessage] Saved conversation state for user %d (Entity: %s)\n", userID, entityType)
+								}
+							} else {
+								// Save to Master File (General) and clear context
+								stateData := map[string]interface{}{
+									"conversation_state": conversationState,
+									"updated_at":         time.Now().Format(time.RFC3339),
+									"active_context":     "",
+								}
+								if data, err := json.Marshal(stateData); err == nil {
+									os.WriteFile(masterFile, data, 0644)
+									fmt.Printf("[SendMessage] Saved conversation state for user %d (General)\n", userID)
+								}
+							}
+						}
+					}
+					
+
 		
 		// Modify message if workflow is executing AND we don't have actual data yet
 		displayMessage := message
@@ -352,14 +470,50 @@ func handleSendMessage(c *fiber.Ctx, params []WorkflowDetailResult, db *gorm.DB)
 						if userID, ok := c.Locals("userid").(int); ok && userID > 0 {
 							conversationDir := "./tmp/ai_conversations"
 							os.MkdirAll(conversationDir, 0755)
-							conversationFile := fmt.Sprintf("%s/%d.json", conversationDir, userID)
-							stateData := map[string]interface{}{
-								"conversation_state": conversationState,
-								"updated_at":         time.Now().Format(time.RFC3339),
+							
+							var stateMap map[string]interface{}
+							isEntity := false
+							entityType := ""
+							if err := json.Unmarshal([]byte(conversationState), &stateMap); err == nil {
+								if et, ok := stateMap["entity_type"].(string); ok && et != "" {
+									isEntity = true
+									entityType = et
+								}
 							}
-							if data, err := json.Marshal(stateData); err == nil {
-								os.WriteFile(conversationFile, data, 0644)
-								fmt.Printf("[SendMessage] Saved Telegram conversation state for user %d\n", userID)
+							
+							masterFile := fmt.Sprintf("%s/%d.json", conversationDir, userID)
+
+							if isEntity {
+								var masterState map[string]interface{}
+								if data, err := os.ReadFile(masterFile); err == nil {
+									json.Unmarshal(data, &masterState)
+								}
+								if masterState == nil { masterState = make(map[string]interface{}) }
+								
+								masterState["active_context"] = entityType
+								if d, err := json.Marshal(masterState); err == nil {
+									os.WriteFile(masterFile, d, 0644)
+								}
+								
+								entityFile := fmt.Sprintf("%s/%d_%s.json", conversationDir, userID, entityType)
+								stateData := map[string]interface{}{
+									"conversation_state": conversationState,
+									"updated_at":         time.Now().Format(time.RFC3339),
+								}
+								if data, err := json.Marshal(stateData); err == nil {
+									os.WriteFile(entityFile, data, 0644)
+									fmt.Printf("[SendMessage] Saved Telegram conversation state for user %d (Entity: %s)\n", userID, entityType)
+								}
+							} else {
+								stateData := map[string]interface{}{
+									"conversation_state": conversationState,
+									"updated_at":         time.Now().Format(time.RFC3339),
+									"active_context":     "",
+								}
+								if data, err := json.Marshal(stateData); err == nil {
+									os.WriteFile(masterFile, data, 0644)
+									fmt.Printf("[SendMessage] Saved Telegram conversation state for user %d (General)\n", userID)
+								}
 							}
 						}
 					}
