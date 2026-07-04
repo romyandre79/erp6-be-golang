@@ -1,6 +1,6 @@
 module erp6-be-golang
 
-go 1.25.5
+go 1.26.4
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
@@ -95,6 +95,7 @@ require (
 	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/metric v1.38.0 // indirect
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
+	golang.org/dl v0.0.0-20260618194738-ed70cd925632 // indirect
 	golang.org/x/exp v0.0.0-20251209150349-8475f28825e9 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240903143218-8af14fe29dc1 // indirect
