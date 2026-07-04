@@ -1,6 +1,6 @@
 module erp6-be-golang
 
-go 1.25.5
+go 1.26.4
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
@@ -14,7 +14,6 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/ledongthuc/pdf v0.0.0-20220302134840-0c2507a12d80
 	github.com/liushuangls/go-anthropic/v2 v2.17.0
-	github.com/nguyenthenguyen/docx v0.0.0-20230621112118-9c8e795a11db
 	github.com/openai/openai-go/v3 v3.15.0
 	github.com/redis/go-redis/v9 v9.14.1
 	github.com/robfig/cron/v3 v3.0.1
